@@ -6,7 +6,7 @@ FinPilot is a production-oriented, tenant-isolated financial intelligence applic
 
 ## Working features
 
-- Authentication, household membership authorization, and server-derived tenant isolation.
+- Passwordless synthetic-workspace entry in the web console; internal short-lived authorization and server-derived tenant isolation remain enforced by the API.
 - Idempotent CSV ingestion with explicit mappings, row errors, exact minor units, transfers/refunds, and correction lineage.
 - Recurrence, robust anomaly detection, immutable snapshots, chronological backtests, 30/60/90-day forecasts, and what-if branches.
 - Typed LangGraph analyst, advisor, critic, and verifier flow. All model inference uses Mesh; no provider fallback exists.
@@ -14,7 +14,7 @@ FinPilot is a production-oriented, tenant-isolated financial intelligence applic
 - Versioned governance assets, risk/evaluation gates, human-review queue, exact recommendation lineage, and governance UI.
 - Durable timezone-aware weekly digests with signed Vercel Cron dispatch, SQL locking, dedupe keys, and in-app delivery audit.
 - Responsive glass-material console (light/dark, ⌘K command palette, interactive SVG charts) with Overview, Ledger, Forecast, Advisor, Audit, Governance, Digests, and How it works views.
-- One-click synthetic demo and a versioned fictional household statement (`evaluation/datasets/synthetic_household_v1.csv`) that exercises the real ingestion, analytics, and validation paths.
+- Automatic synthetic demo and a versioned fictional household statement (`evaluation/datasets/synthetic_household_v1.csv`) that exercises the real ingestion, analytics, and validation paths without a login form.
 
 ## Local quickstart
 
@@ -37,7 +37,7 @@ Open `http://localhost:3000`. Interactive API documentation is at `http://localh
 
 ```mermaid
 flowchart LR
-  UI[Next.js operations console] -->|JWT + authorized tenant selector| API[FastAPI]
+  UI[Next.js operations console] -->|same-origin gateway + internal session| API[FastAPI]
   API --> AUTH[Membership boundary]
   AUTH --> DB[(PostgreSQL)]
   API --> INGEST[CSV normalization]
@@ -56,7 +56,7 @@ See [system design](docs/architecture/system-design.md), [agent workflow](docs/a
 
 ## API surface
 
-All product endpoints are under `/api/v1`; tenant endpoints require `Authorization: Bearer …` and `X-Tenant-ID`. Major groups are authentication, accounts/uploads/transactions, analytics snapshots/forecasts/scenarios, agent runs, governance, and digests/notifications. The digest dispatcher is authenticated separately with `CRON_SECRET`.
+All product endpoints are under `/api/v1`. The web console provisions an isolated synthetic workspace through `/workspace/bootstrap` and carries the resulting short-lived internal session automatically; users do not enter credentials. Major groups are workspaces, accounts/uploads/transactions, analytics snapshots/forecasts/scenarios, agent runs, governance, and digests/notifications. The digest dispatcher is authenticated separately with `CRON_SECRET`.
 
 See [API guide](docs/api/README.md) and generated OpenAPI for the exact contract.
 
@@ -78,7 +78,7 @@ docker compose config --quiet
 git diff --check
 ```
 
-The latest recorded local run passed 219 tests at 81% line coverage, strict typing, linting, Next production build, PostgreSQL migrations through `20261016_0006`, and browser smoke tests. The bounded offline Promptfoo corpus passed 184/184 cases (168 attacks and 16 legitimate controls). Detailed evidence is in [implementation status](docs/IMPLEMENTATION_STATUS.md) and [evaluation results](docs/evaluation/results.md).
+The latest recorded local run passed 221 tests, strict typing, linting, Next production build, PostgreSQL migrations through `20261016_0006`, and browser smoke tests. The bounded offline Promptfoo corpus passed 184/184 cases (168 attacks and 16 legitimate controls). Detailed evidence is in [implementation status](docs/IMPLEMENTATION_STATUS.md) and [evaluation results](docs/evaluation/results.md).
 
 ## Deployment and limitations
 

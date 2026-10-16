@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AdvisorView, AuditView } from "./console/advisor";
-import { AuthScreen, Brand } from "./console/auth-screen";
+import { Brand } from "./console/brand";
 import { ForecastView, type RunConfig } from "./console/forecast";
 import { DigestView, GovernanceView } from "./console/governance";
 import { Inspector } from "./console/inspector";
@@ -16,7 +16,7 @@ import { Icon } from "./ui/icons";
 import { Kbd } from "./ui/primitives";
 import { ThemeToggle, setThemePreference } from "./ui/theme";
 import { ToastStack, useToasts } from "./ui/toast";
-import { DEFAULT_MAPPING, SAMPLE_STATEMENT, type Session, request, syntheticIdentity } from "@/lib/client";
+import { DEFAULT_MAPPING, SAMPLE_STATEMENT, type Session, request } from "@/lib/client";
 import { addDays, compactMoney, humanize, minorFromRupees } from "@/lib/format";
 import { deriveInsights } from "@/lib/insights";
 import type {
@@ -25,7 +25,7 @@ import type {
   UploadResult, View
 } from "@/lib/types";
 
-type Busy = null | "auth" | "demo" | "account" | "upload" | "analysis" | "advisor" | "governance" | "digest" | "correction";
+type Busy = null | "demo" | "account" | "upload" | "analysis" | "advisor" | "governance" | "digest" | "correction";
 type ActiveSession = { token: string; tenant: Tenant };
 
 const LEDGER_PAGE = 200;
@@ -75,9 +75,7 @@ function uploadStatement(auth: Session, accountId: string, file: File) {
 
 export function ProductConsole() {
   const [session, setSession] = useState<ActiveSession | null>(null);
-  const [publicView, setPublicView] = useState<"auth" | "system">("auth");
   const [view, setView] = useState<View>("overview");
-  const [demoIdentity, setDemoIdentity] = useState<{ email: string; password: string } | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [transactionTotal, setTransactionTotal] = useState(0);
@@ -93,10 +91,11 @@ export function ProductConsole() {
   const [config, setConfigState] = useState<RunConfig>(INITIAL_CONFIG);
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [busy, setBusy] = useState<Busy>(null);
-  const [authError, setAuthError] = useState("");
+  const [startupError, setStartupError] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const bootstrapStarted = useRef(false);
   const { toasts, push, dismiss } = useToasts();
 
   const auth: Session | undefined = session ? { token: session.token, tenantId: session.tenant.id } : undefined;
@@ -155,36 +154,11 @@ export function ProductConsole() {
     return { scope, tenant };
   }
 
-  /* ---------- authentication ---------- */
-
-  async function authenticate(mode: "login" | "register", form: FormData) {
-    setBusy("auth");
-    setAuthError("");
-    try {
-      const body = mode === "register"
-        ? { email: form.get("email"), password: form.get("password"), household_name: form.get("household") }
-        : { email: form.get("email"), password: form.get("password") };
-      const { access_token: token } = await request<{ access_token: string }>(`/api/v1/auth/${mode}`, { method: "POST", body: JSON.stringify(body) });
-      const { scope, tenant } = await openSession(token);
-      await loadWorkspace(scope);
-      setSession({ token, tenant });
-      navigate("overview");
-    } catch (caught) {
-      setAuthError(message(caught, "Authentication failed"));
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function startDemo() {
     setBusy("demo");
-    setAuthError("");
+    setStartupError("");
     try {
-      const identity = syntheticIdentity();
-      const { access_token: token } = await request<{ access_token: string }>("/api/v1/auth/register", {
-        method: "POST",
-        body: JSON.stringify({ email: identity.email, password: identity.password, household_name: identity.household })
-      });
+      const { access_token: token } = await request<{ access_token: string }>("/api/v1/workspace/bootstrap", { method: "POST" });
       const { scope, tenant } = await openSession(token);
       const account = await request<Account>("/api/v1/accounts", {
         method: "POST",
@@ -194,35 +168,13 @@ export function ProductConsole() {
       setUploadResult(result);
       await loadWorkspace(scope);
       setSession({ token, tenant });
-      setDemoIdentity({ email: identity.email, password: identity.password });
       navigate("overview");
       push({ tone: "success", title: "Synthetic household ready", body: `${result.accepted_rows} rows imported · ${result.duplicate_rows} duplicate · ${result.rejected_rows} rejected. Next: Run analysis.` });
     } catch (caught) {
-      setAuthError(message(caught, "Could not start the synthetic demo"));
+      setStartupError(message(caught, "Could not open the synthetic workspace"));
     } finally {
       setBusy(null);
     }
-  }
-
-  function signOut() {
-    setSession(null);
-    setDemoIdentity(null);
-    setAccounts([]);
-    setTransactions([]);
-    setTransactionTotal(0);
-    setUploadResult(null);
-    setSnapshot(null);
-    setForecast(null);
-    setScenario(null);
-    setAgentRun(null);
-    setVisibleEvents(0);
-    setGovernance(null);
-    setDigestPreference(null);
-    setNotifications([]);
-    setConfigState(INITIAL_CONFIG);
-    setQuestion(DEFAULT_QUESTION);
-    setView("overview");
-    setPublicView("auth");
   }
 
   /* ---------- ledger ---------- */
@@ -415,6 +367,14 @@ export function ProductConsole() {
   /* ---------- effects ---------- */
 
   useEffect(() => {
+    if (bootstrapStarted.current) return;
+    bootstrapStarted.current = true;
+    void startDemo();
+    // The synthetic workspace is intentionally provisioned once per browser mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     if (!agentRun || visibleEvents <= 0 || visibleEvents >= agentRun.events.length) return;
     const timer = window.setTimeout(() => setVisibleEvents((count) => count + 1), 650);
     return () => window.clearTimeout(timer);
@@ -436,14 +396,21 @@ export function ProductConsole() {
   if (!session) {
     return (
       <>
-        {publicView === "system" ? (
-          <div className="public-shell">
-            <header className="auth-topbar"><Brand /><button className="btn btn-glass" onClick={() => setPublicView("auth")}><Icon name="chevronLeft" size={14} />Back to sign in</button></header>
-            <SystemMap agentRun={null} visibleEvents={0} setVisibleEvents={() => undefined} />
-          </div>
-        ) : (
-          <AuthScreen busy={busy === "auth" || busy === "demo" ? busy : null} error={authError} onAuthenticate={authenticate} onStartDemo={startDemo} onShowSystem={() => setPublicView("system")} />
-        )}
+        <div className="auth-shell startup-shell">
+          <header className="auth-topbar"><Brand /><ThemeToggle /></header>
+          <main className="startup-layout">
+            <section className="glass-strong startup-card" aria-live="polite">
+              <span className="startup-mark"><Icon name={startupError ? "alert" : "refresh"} size={22} className={!startupError ? "spin" : ""} /></span>
+              <p className="eyebrow">FINPILOT WORKSPACE</p>
+              <h1>{startupError ? "The workspace could not open" : "Preparing your decision cockpit"}</h1>
+              <p className="lede">{startupError || "Loading a private synthetic household and its auditable financial ledger. No login is required."}</p>
+              {startupError ? (
+                <button className="btn btn-primary btn-lg" onClick={() => void startDemo()} disabled={busy !== null}><Icon name="refresh" size={15} />Try again</button>
+              ) : <div className="startup-progress"><i /></div>}
+              <small className="fine-print"><Icon name="lock" size={12} />Synthetic data only · isolated workspace · deterministic money math</small>
+            </section>
+          </main>
+        </div>
         <ToastStack toasts={toasts} dismiss={dismiss} />
       </>
     );
@@ -470,7 +437,6 @@ export function ProductConsole() {
     { id: "theme-light", label: "Light appearance", group: "Appearance", icon: "sun", run: () => setThemePreference("light") },
     { id: "theme-dark", label: "Dark appearance", group: "Appearance", icon: "moon", run: () => setThemePreference("dark") },
     { id: "theme-system", label: "Match system appearance", group: "Appearance", icon: "monitor", run: () => setThemePreference("system") },
-    { id: "sign-out", label: "Sign out", group: "Account", icon: "logout", run: signOut }
   ];
 
   return (
@@ -481,10 +447,8 @@ export function ProductConsole() {
         open={sidebarOpen}
         badges={{ ledger: transactionTotal, governance: governance?.summary.pending_reviews, advice: agentRun?.recommendations.length }}
         completed={completed}
-        demoIdentity={demoIdentity}
         onNavigate={navigate}
         onClose={() => setSidebarOpen(false)}
-        onSignOut={signOut}
       />
       {sidebarOpen && <div className="scrim" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
 

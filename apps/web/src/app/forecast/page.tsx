@@ -1,5 +1,5 @@
-import { ForecastStudio } from "@/components/forecast-studio";
+import { redirect } from "next/navigation";
 
 export default function ForecastPage() {
-  return <ForecastStudio />;
+  redirect("/");
 }

@@ -1,5 +1,5 @@
-import { TransactionWorkspace } from "@/components/transaction-workspace";
+import { redirect } from "next/navigation";
 
 export default function TransactionsPage() {
-  return <TransactionWorkspace />;
+  redirect("/");
 }

@@ -1,7 +1,7 @@
 # Demo runbook
 
-1. Start Docker Compose and open `http://localhost:3000`.
-2. Choose **Start synthetic demo**. It registers a fresh household with random in-memory credentials, creates an INR account, and uploads the bundled fictional statement through the real ingestion API. Alternatively register manually and use **Load synthetic sample** (Overview or Ledger) or drop your own CSV.
+1. Start Docker Compose and open `http://localhost:3000`. FinPilot automatically provisions an isolated synthetic workspace; there is no login or password step.
+2. Wait for the bundled fictional statement to import through the real ingestion API, then use **Load synthetic sample** (Overview or Ledger) to replay the idempotent import or drop your own synthetic CSV.
 3. Inspect exact rows, transfer exclusion, confidence, and provenance in Ledger.
 4. In Forecast, keep the detected balance date, pick a horizon and a what-if preset, and choose **Run analysis** (deterministic, no model call). **Ask advisor** or **Run FinPilot** additionally runs the Mesh specialists; live inference requires approved Mesh egress.
 5. Inspect Forecast, verified/withheld Advice, and deterministic-versus-Mesh Audit nodes.

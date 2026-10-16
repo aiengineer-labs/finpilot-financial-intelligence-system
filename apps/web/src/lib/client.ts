@@ -1,4 +1,4 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 
 export const SAMPLE_STATEMENT = {
   path: "/samples/finpilot-synthetic-household-v1.csv",
@@ -35,22 +35,11 @@ export async function request<T>(path: string, init: RequestInit = {}, session?:
   try {
     response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   } catch {
-    throw new Error(`FinPilot API is unreachable at ${API_BASE}`);
+    throw new Error("FinPilot API is unavailable through the application gateway");
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { detail?: Detail };
     throw new Error(describe(body.detail, response.status));
   }
   return (await response.json()) as T;
-}
-
-/** Synthetic demo credentials are random, in-memory, and never reused across sessions. */
-export function syntheticIdentity() {
-  const bytes = crypto.getRandomValues(new Uint8Array(18));
-  const token = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return {
-    email: `synthetic-demo-${token.slice(0, 10)}@example.com`,
-    password: `fp-${token.slice(10)}`,
-    household: "Synthetic demo household"
-  };
 }
