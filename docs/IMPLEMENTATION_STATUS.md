@@ -4,7 +4,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 
 ## Environment
 
-- Repository: `feat/phase-1-foundation`; Phase 1 commit `0fa8e5d`, Phase 2 commit `4621a87`, based on `origin/main` at `1a3f50e`.
+- Repository: `feat/phase-1-foundation`; Phase 1 commit `0fa8e5d`, Phase 2 commit `4621a87`, Phase 3 engine checkpoint `cf19fe6`, based on `origin/main` at `1a3f50e`.
 - Available: Python 3.14.7, uv 0.7.13, Node 22.15.0, Corepack 0.32.0, Docker CLI 29.8.2, Compose 5.6.0, Git 2.55.0.
 - Installed/project-managed: Python 3.12.11 virtualenv (`apps/api/.venv`), locked backend dependencies, Corepack pnpm 10.18.3, locked frontend dependencies, Docker daemon 29.8.2.
 - Missing globally: standalone `psql` and `vercel` (PostgreSQL validation uses the pinned container CLI). Docker Desktop was started for integration verification.
@@ -49,6 +49,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 | 2026-10-16 | `pip-audit` | Initial finding: pytest 8.4.2 dev-only advisory PYSEC-2026-1845; upgraded pytest to 9.1.1 and pytest-asyncio to 1.4.0; re-scan PASS with no known vulnerabilities; 12 tests still pass |
 | 2026-10-16 | Phase 2 local commit | PASS: `4621a87 feat: add idempotent transaction ingestion` |
 | 2026-10-16 | Phase 3 engine checks | PASS: Ruff, strict mypy over 33 application modules, 17 pytest/Hypothesis tests, 82% line coverage |
+| 2026-10-16 | Phase 3 engine checkpoint | PASS: `cf19fe6 feat: add deterministic financial engines` |
 
 ## External blockers
 
