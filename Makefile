@@ -47,4 +47,4 @@ seed-demo:
 
 # Root requirements.txt (pinned runtime set for the organizer checks) is generated from apps/api/uv.lock.
 requirements:
-	uv export --project apps/api --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements.txt
+	uv export --project apps/api --frozen --no-dev --no-hashes --no-emit-project --no-annotate --no-header --format requirements-txt -o requirements.txt
