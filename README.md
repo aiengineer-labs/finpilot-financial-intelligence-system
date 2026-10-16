@@ -89,7 +89,8 @@ Known blockers include the not-yet-run Mesh model-based red team, unverified Ver
 ## Documentation map
 
 - [Demo runbook](docs/demo.md)
-- [Security architecture](docs/security/guardrail-architecture.md) and [testing](docs/security/security-testing.md)
-- [Governance charter](docs/governance/governance-charter.md) and [risk register](docs/governance/risk-register.md)
-- [Local Docker](docs/deployment/local-docker.md) and [Vercel](docs/deployment/vercel.md)
-- [Evaluation methodology](docs/evaluation/methodology.md) and [results](docs/evaluation/results.md)
+- Decision records: [ADR 0001 deterministic financial authority](docs/adr/0001-neuro-symbolic-boundary.md) and [ADR 0002 stateless digest dispatch](docs/adr/0002-stateless-digest-dispatch.md)
+- Security: [threat model](docs/security/threat-model.md), [guardrail architecture](docs/security/guardrail-architecture.md), [prompt-injection defense](docs/security/prompt-injection-defense.md), [agent permissions](docs/security/agent-permissions.md), [data privacy](docs/security/data-privacy.md), [testing](docs/security/security-testing.md), and [known limitations](docs/security/known-limitations.md)
+- Governance: [charter](docs/governance/governance-charter.md), [risk register](docs/governance/risk-register.md), [model and prompt registry](docs/governance/model-and-prompt-registry.md), [model cards](docs/governance/model-cards.md), [human oversight](docs/governance/human-oversight.md), [change management](docs/governance/change-management.md), [drift monitoring](docs/governance/drift-monitoring.md), and [incident response](docs/governance/incident-response.md)
+- Deployment: [local Docker](docs/deployment/local-docker.md), [Vercel](docs/deployment/vercel.md), and [environment variables](docs/deployment/environment-variables.md)
+- Evaluation: [methodology](docs/evaluation/methodology.md), [results](docs/evaluation/results.md), and the [Promptfoo lanes](evaluation/promptfoo/README.md)
