@@ -47,3 +47,17 @@ async def test_missing_authentication_is_rejected(client: AsyncClient) -> None:
         "/api/v1/accounts", headers={"X-Tenant-ID": "00000000-0000-0000-0000-000000000001"}
     )
     assert response.status_code == 401
+
+
+async def test_duplicate_registration_is_a_conflict(client: AsyncClient) -> None:
+    await _register(client, "repeat@example.com", "First")
+    repeated = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "Repeat@example.com",
+            "password": "another-long-password",
+            "household_name": "Second",
+        },
+    )
+    assert repeated.status_code == 409
+    assert repeated.json()["detail"] == "email already registered"

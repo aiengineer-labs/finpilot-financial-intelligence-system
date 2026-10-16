@@ -13,7 +13,8 @@ FinPilot is a production-oriented, tenant-isolated financial intelligence applic
 - Deterministic input/tool policy, NeMo Guardrails, Presidio minimization, fail-closed output verification, and persisted audit events.
 - Versioned governance assets, risk/evaluation gates, human-review queue, exact recommendation lineage, and governance UI.
 - Durable timezone-aware weekly digests with signed Vercel Cron dispatch, SQL locking, dedupe keys, and in-app delivery audit.
-- Responsive console with Live workspace, How it works, Ledger, Forecast, Advice, Audit, Digests, and Governance views.
+- Responsive glass-material console (light/dark, ⌘K command palette, interactive SVG charts) with Overview, Ledger, Forecast, Advisor, Audit, Governance, Digests, and How it works views.
+- One-click synthetic demo and a versioned fictional household statement (`evaluation/datasets/synthetic_household_v1.csv`) that exercises the real ingestion, analytics, and validation paths.
 
 ## Local quickstart
 

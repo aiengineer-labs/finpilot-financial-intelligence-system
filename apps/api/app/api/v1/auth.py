@@ -40,12 +40,13 @@ async def register(
     user = User(email=body.email.lower(), password_hash=hash_password(body.password))
     tenant = Tenant(name=body.household_name, slug=_slugify(body.household_name))
     session.add_all([user, tenant])
-    await session.flush()
-    session.add(Membership(user_id=user.id, tenant_id=tenant.id, role=TenantRole.OWNER))
-    await ensure_governance_baseline(
-        session, tenant_id=tenant.id, owner_user_id=user.id, settings=settings
-    )
     try:
+        # The unique email constraint fires at the first flush, not only at commit.
+        await session.flush()
+        session.add(Membership(user_id=user.id, tenant_id=tenant.id, role=TenantRole.OWNER))
+        await ensure_governance_baseline(
+            session, tenant_id=tenant.id, owner_user_id=user.id, settings=settings
+        )
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
+import { LineChart } from "@/components/ui/charts";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -56,32 +57,6 @@ function parseRupees(value: string): number {
 
 function money(minor: number, currency: string) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency }).format(minor / 100);
-}
-
-function Curve({ baseline, scenario }: { baseline: Point[]; scenario?: Point[] }) {
-  const paths = useMemo(() => {
-    const values = [...baseline, ...(scenario ?? [])].map((point) => point.balance_minor);
-    const low = Math.min(...values);
-    const high = Math.max(...values);
-    const range = Math.max(high - low, 1);
-    const coordinates = (points: Point[]) => points.map((point, index) => {
-      const x = points.length === 1 ? 0 : (index / (points.length - 1)) * 760;
-      const y = 190 - ((point.balance_minor - low) / range) * 170;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(" ");
-    return { baseline: coordinates(baseline), scenario: scenario ? coordinates(scenario) : "", low, high };
-  }, [baseline, scenario]);
-
-  return (
-    <div className="curve-wrap">
-      <svg viewBox="0 0 760 210" role="img" aria-label="Projected daily balance curve">
-        <line x1="0" x2="760" y1="190" y2="190" className="chart-axis" />
-        <polyline points={paths.baseline} className="chart-line baseline" />
-        {paths.scenario && <polyline points={paths.scenario} className="chart-line scenario" />}
-      </svg>
-      <div className="chart-legend"><span>● Baseline</span>{scenario && <span>● Scenario</span>}<small>Range {paths.low}–{paths.high} minor units</small></div>
-    </div>
-  );
 }
 
 export function ForecastStudio() {
@@ -212,7 +187,8 @@ export function ForecastStudio() {
         <section className="workspace-card analytics-summary">
           <div><p className="eyebrow">REPRODUCIBLE RESULT</p><h2>{forecast.horizon_days}-day balance trajectory</h2></div>
           <div className="result-grid"><b>{money(forecast.opening_balance_minor, snapshot.currency)}<span>opening balance</span></b><b>{money(forecast.minimum_balance_minor, snapshot.currency)}<span>baseline minimum</span></b><b>{snapshot.recurring_patterns.length}<span>recurring patterns</span></b></div>
-          <Curve baseline={forecast.points} scenario={scenario?.points} />
+          <div className="legend-inline"><span><i className="line-key" style={{ background: "var(--viz-1)" }} />Baseline</span>{scenario && <span><i className="line-key" style={{ background: "var(--viz-2)" }} />{scenario.name}</span>}</div>
+          <LineChart ariaLabel="Projected daily balance curve" days={forecast.points.map((point) => point.day)} series={[{ id: "baseline", label: "Baseline", values: forecast.points.map((point) => point.balance_minor), color: "var(--viz-1)", area: true }, ...(scenario ? [{ id: "scenario", label: scenario.name, values: scenario.points.map((point) => point.balance_minor), color: "var(--viz-2)" }] : [])]} />
           {scenario && <div className="scenario-callout"><strong>{scenario.name}</strong><span>Minimum {money(scenario.minimum_balance_minor, snapshot.currency)}</span><span>Ending change {money(scenario.ending_delta_minor, snapshot.currency)}</span><span>{scenario.first_shortfall_date ? `First shortfall ${scenario.first_shortfall_date}` : "No projected shortfall"}</span></div>}
         </section>
         <section className="workspace-grid analytics-details">

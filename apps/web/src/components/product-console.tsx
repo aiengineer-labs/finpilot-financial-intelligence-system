@@ -1,257 +1,418 @@
 "use client";
 
-import { CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { AdvisorView, AuditView } from "./console/advisor";
+import { AuthScreen, Brand } from "./console/auth-screen";
+import { ForecastView, type RunConfig } from "./console/forecast";
+import { DigestView, GovernanceView } from "./console/governance";
+import { Inspector } from "./console/inspector";
+import { Ledger } from "./console/ledger";
+import { Overview } from "./console/overview";
+import { type StageId, VIEWS } from "./console/shared";
+import { Sidebar } from "./console/sidebar";
+import { SystemMap } from "./console/system-map";
+import { type Command, CommandPalette } from "./ui/command-palette";
+import { Icon } from "./ui/icons";
+import { Kbd } from "./ui/primitives";
+import { ThemeToggle, setThemePreference } from "./ui/theme";
+import { ToastStack, useToasts } from "./ui/toast";
+import { DEFAULT_MAPPING, SAMPLE_STATEMENT, type Session, request, syntheticIdentity } from "@/lib/client";
+import { addDays, compactMoney, humanize, minorFromRupees } from "@/lib/format";
+import { deriveInsights } from "@/lib/insights";
+import type {
+  Account, AgentRun, DigestPreference, EvaluationRun, Forecast, GovernanceArtifact, GovernanceData,
+  GovernanceRisk, GovernanceSummary, HumanReview, Notification, Scenario, Snapshot, Tenant, Transaction,
+  UploadResult, View
+} from "@/lib/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-const DEFAULT_MAPPING = JSON.stringify({
-  date: "Date", date_format: "%d/%m/%Y", debit: "Debit", credit: "Credit",
-  merchant: "Merchant", description: "Description", transaction_id: "Transaction ID",
-  currency: "Currency", balance: "Balance"
-});
+type Busy = null | "auth" | "demo" | "account" | "upload" | "analysis" | "advisor" | "governance" | "digest" | "correction";
+type ActiveSession = { token: string; tenant: Tenant };
 
-type Mode = "live" | "system";
-type View = "overview" | "ledger" | "forecast" | "advice" | "audit" | "digests" | "governance";
-type Tenant = { id: string; name: string; role: string };
-type Account = { id: string; name: string; currency: string };
-type Transaction = {
-  id: string; transaction_date: string; amount_minor: number; balance_minor: number | null;
-  currency: string; merchant_normalized: string; description: string; kind: string;
-  category: string; classification_method: string; classification_confidence_bps: number;
-  is_excluded_from_cashflow: boolean;
-};
-type Pattern = { id: string; merchant: string; cadence: string; typical_amount_minor: number; confidence_bps: number };
-type Snapshot = { id: string; as_of: string; currency: string; opening_balance_minor: number; source_transaction_count: number; recurring_patterns: Pattern[]; anomaly_results: Array<{ transaction_id: string; severity: string; explanation: string }> };
-type Point = { day: string; balance_minor: number; recurring_flow_minor: number; estimated_variable_spend_minor: number };
-type Forecast = { id: string; horizon_days: number; opening_balance_minor: number; minimum_balance_minor: number; assumptions: string[]; points: Point[] };
-type Scenario = { id: string; name: string; minimum_balance_minor: number; first_shortfall_date: string | null; ending_delta_minor: number; points: Point[] };
-type AgentEvent = { id: string; sequence: number; node: string; event_type: string; summary: string; details: Record<string, unknown>; model_id: string | null; latency_ms: number | null; input_tokens: number | null; output_tokens: number | null };
-type Recommendation = { id: string; rank: number; title: string; explanation: string; amount_minor: number | null; currency: string; evidence_ids: string[]; assumptions: string[]; confidence_bps: number; verification_status: string };
-type AgentRun = { id: string; status: string; verification_status: string; final_response: string; model_id: string; revision_attempts: number; total_latency_ms: number; total_input_tokens: number; total_output_tokens: number; events: AgentEvent[]; recommendations: Recommendation[] };
-type GovernanceSummary = { artifacts: number; risks: number; pending_reviews: number; evaluation_failures: number; rejected_recommendations: number; release_ready: boolean; release_blockers: string[]; drift_alerts: string[]; baseline_version: string };
-type GovernanceArtifact = { id: string; artifact_type: string; name: string; version: string; content_sha256: string; status: string; approval_source: string; approval_reason: string | null; created_at: string };
-type GovernanceRisk = { id: string; risk_id: string; category: string; likelihood: string; impact: string; residual_risk: string; mitigation: string; owner_role: string; review_on: string; acceptance_status: string };
-type EvaluationRun = { id: string; dataset_id: string; dataset_version: string; status: string; metrics: Record<string, number | string>; thresholds: Record<string, number | string>; model_id: string | null; failures: string[]; duration_ms: number; code_version: string };
-type HumanReview = { id: string; source: string; reason: string; risk_level: string; status: string; evidence_ids: string[]; artifact_lineage: Record<string, string>; requested_by_user_id: string | null; created_at: string };
-type GovernanceData = { summary: GovernanceSummary; artifacts: GovernanceArtifact[]; risks: GovernanceRisk[]; evaluations: EvaluationRun[]; reviews: HumanReview[] };
-type DigestPreference = { id: string; enabled: boolean; weekday: number; local_time: string; timezone: string; next_due_at: string; last_dispatched_at: string | null };
-type Notification = { id: string; digest_job_id: string; status: string; subject: string; body: string; delivered_at: string | null; created_at: string };
+const LEDGER_PAGE = 200;
+const LEDGER_CAP = 1000;
+const DEFAULT_QUESTION = "Can I afford this purchase without jeopardizing my cash buffer?";
+const INITIAL_CONFIG: RunConfig = { asOf: "", horizon: 30, scenarioEnabled: true, scenarioName: "Laptop purchase", scenarioAmount: "75000.00", scenarioDate: "" };
 
-const stages = [
-  ["import", "Import"], ["categorize", "Categorize"], ["analyze", "Analyze"],
-  ["forecast", "Forecast"], ["advise", "Advise"], ["verify", "Verify"]
-] as const;
-
-const architecture = [
-  { id: "ingest", icon: "⇩", title: "CSV ingestion", detail: "Validates UTF-8, explicit dates, exact minor units, duplicates, transfers and row errors.", runtime: "FastAPI · deterministic" },
-  { id: "truth", icon: "▦", title: "PostgreSQL truth", detail: "Tenant-scoped ledger, immutable snapshot manifests and correction lineage.", runtime: "SQLAlchemy · Alembic" },
-  { id: "analyst", icon: "⌁", title: "Behavior analyst", detail: "Explains recurrence and robust anomaly evidence without performing arithmetic.", runtime: "LangGraph · Mesh" },
-  { id: "forecast", icon: "↗", title: "Forecast engine", detail: "Builds reproducible daily 30/60/90-day curves from known balances and patterns.", runtime: "Python integer math" },
-  { id: "advisor", icon: "◇", title: "Financial advisor", detail: "Drafts bounded options citing only supplied snapshot, forecast and scenario evidence.", runtime: "LangGraph · Mesh" },
-  { id: "critic", icon: "◎", title: "Critic loop", detail: "Challenges unsupported or overconfident advice and requests one bounded revision.", runtime: "LangGraph · Mesh" },
-  { id: "verifier", icon: "✓", title: "Financial verifier", detail: "Rejects unknown amounts, evidence, currencies and prohibited certainty in plain code.", runtime: "Fail-closed · no LLM" },
-  { id: "audit", icon: "≡", title: "Audit ledger", detail: "Persists every transition, model ID, latency, tokens, rejected draft and final decision.", runtime: "PostgreSQL · immutable lineage" },
-  { id: "digest", icon: "◴", title: "Digest dispatcher", detail: "Claims due weekly work once and records an idempotent in-app delivery.", runtime: "Signed Vercel Cron · SQL lock" }
-];
-
-function minorFromRupees(value: string): number {
-  const normalized = value.trim().replaceAll(",", "");
-  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) throw new Error("Use a positive amount with at most two decimals");
-  const [whole, fraction = ""] = normalized.split(".");
-  return Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+function message(caught: unknown, fallback: string) {
+  return caught instanceof Error ? caught.message : fallback;
 }
 
-function money(minor: number, currency = "INR") {
-  return new Intl.NumberFormat("en-IN", { style: "currency", currency, maximumFractionDigits: 0 }).format(minor / 100);
+/** Keeps the what-if date inside (as_of, as_of + horizon], which the scenario API requires. */
+function normalizeConfig(next: RunConfig): RunConfig {
+  if (!next.asOf) return next;
+  const min = addDays(next.asOf, 1);
+  const max = addDays(next.asOf, next.horizon);
+  if (!next.scenarioDate || next.scenarioDate < min || next.scenarioDate > max) {
+    return { ...next, scenarioDate: addDays(next.asOf, Math.min(10, next.horizon)) };
+  }
+  return next;
 }
 
-function BalanceChart({ baseline, scenario }: { baseline: Point[]; scenario?: Point[] }) {
-  const paths = useMemo(() => {
-    const values = [...baseline, ...(scenario ?? [])].map((point) => point.balance_minor);
-    const low = Math.min(...values); const high = Math.max(...values); const range = Math.max(high - low, 1);
-    const line = (points: Point[]) => points.map((point, index) => `${((index / Math.max(points.length - 1, 1)) * 700).toFixed(1)},${(190 - ((point.balance_minor - low) / range) * 160).toFixed(1)}`).join(" ");
-    return { baseline: line(baseline), scenario: scenario ? line(scenario) : "", low, high };
-  }, [baseline, scenario]);
-  return <div className="fp-chart"><svg viewBox="0 0 700 210" role="img" aria-label="Daily projected balance"><line x1="0" x2="700" y1="190" y2="190" /><polyline className="fp-baseline" points={paths.baseline} />{paths.scenario && <polyline className="fp-scenario" points={paths.scenario} />}</svg><div><span>● Baseline</span>{scenario && <span>● What-if</span>}<small>{money(paths.low)} → {money(paths.high)}</small></div></div>;
+async function fetchLedger(auth: Session) {
+  const items: Transaction[] = [];
+  let total = 0;
+  for (let offset = 0; offset < LEDGER_CAP; offset += LEDGER_PAGE) {
+    const page = await request<{ items: Transaction[]; total: number }>(`/api/v1/transactions?limit=${LEDGER_PAGE}&offset=${offset}`, {}, auth);
+    items.push(...page.items);
+    total = page.total;
+    if (items.length >= total || page.items.length < LEDGER_PAGE) break;
+  }
+  return { items, total };
+}
+
+async function sampleFile() {
+  const response = await fetch(SAMPLE_STATEMENT.path);
+  if (!response.ok) throw new Error("The bundled synthetic statement could not be loaded");
+  return new File([await response.blob()], SAMPLE_STATEMENT.filename, { type: "text/csv" });
+}
+
+function uploadStatement(auth: Session, accountId: string, file: File) {
+  const body = new FormData();
+  body.set("mapping", DEFAULT_MAPPING);
+  body.set("file", file);
+  return request<UploadResult>(`/api/v1/accounts/${accountId}/transaction-uploads`, { method: "POST", body }, auth);
 }
 
 export function ProductConsole() {
-  const [mode, setMode] = useState<Mode>("live");
+  const [session, setSession] = useState<ActiveSession | null>(null);
+  const [publicView, setPublicView] = useState<"auth" | "system">("auth");
   const [view, setView] = useState<View>("overview");
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [token, setToken] = useState("");
-  const [tenant, setTenant] = useState<Tenant | null>(null);
+  const [demoIdentity, setDemoIdentity] = useState<{ email: string; password: string } | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactionTotal, setTransactionTotal] = useState(0);
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [agentRun, setAgentRun] = useState<AgentRun | null>(null);
+  const [visibleEvents, setVisibleEvents] = useState(0);
   const [governance, setGovernance] = useState<GovernanceData | null>(null);
   const [digestPreference, setDigestPreference] = useState<DigestPreference | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [visibleEvents, setVisibleEvents] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [uploadSummary, setUploadSummary] = useState("");
-  const [uploadFileName, setUploadFileName] = useState("");
-  const [asOf, setAsOf] = useState("");
-  const [horizon, setHorizon] = useState(30);
-  const [question, setQuestion] = useState("Can I afford this purchase without jeopardizing my cash buffer?");
-  const [scenarioAmount, setScenarioAmount] = useState("75000.00");
-  const [scenarioDate, setScenarioDate] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [config, setConfigState] = useState<RunConfig>(INITIAL_CONFIG);
+  const [question, setQuestion] = useState(DEFAULT_QUESTION);
+  const [busy, setBusy] = useState<Busy>(null);
+  const [authError, setAuthError] = useState("");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const { toasts, push, dismiss } = useToasts();
 
-  async function api(path: string, init: RequestInit = {}, activeToken = token, activeTenant = tenant?.id) {
-    const headers = new Headers(init.headers);
-    if (!(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
-    if (activeToken) headers.set("Authorization", `Bearer ${activeToken}`);
-    if (activeTenant) headers.set("X-Tenant-ID", activeTenant);
-    const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { detail?: string };
-      throw new Error(body.detail ?? `Request failed (${response.status})`);
-    }
-    return response;
+  const auth: Session | undefined = session ? { token: session.token, tenantId: session.tenant.id } : undefined;
+  const insights = useMemo(() => deriveInsights(transactions), [transactions]);
+
+  function navigate(next: View) {
+    setView(next);
+    window.scrollTo({ top: 0 });
   }
 
-  async function loadWorkspace(activeToken: string, activeTenant: Tenant) {
-    const [accountResponse, transactionResponse] = await Promise.all([
-      api("/api/v1/accounts", {}, activeToken, activeTenant.id),
-      api("/api/v1/transactions?limit=200", {}, activeToken, activeTenant.id)
-    ]);
-    const nextAccounts = (await accountResponse.json()) as Account[];
-    const page = (await transactionResponse.json()) as { items: Transaction[] };
-    setAccounts(nextAccounts); setTransactions(page.items);
-    const known = page.items.find((item) => item.balance_minor !== null);
-    if (known) setAsOf(known.transaction_date);
-    await Promise.all([
-      loadGovernance(activeToken, activeTenant.id),
-      loadDigests(activeToken, activeTenant.id)
-    ]);
+  function setConfig(patch: Partial<RunConfig>) {
+    setConfigState((current) => normalizeConfig({ ...current, ...patch }));
   }
 
-  async function loadDigests(activeToken = token, activeTenant = tenant?.id) {
-    if (!activeToken || !activeTenant) return;
-    const [preferenceResponse, notificationResponse] = await Promise.all([
-      api("/api/v1/digests/preference", {}, activeToken, activeTenant),
-      api("/api/v1/digests/notifications", {}, activeToken, activeTenant)
+  /* ---------- loading ---------- */
+
+  async function loadGovernance(scope: Session | undefined = auth) {
+    if (!scope) return;
+    const [summary, artifacts, risks, evaluations, reviews] = await Promise.all([
+      request<GovernanceSummary>("/api/v1/governance/summary", {}, scope),
+      request<GovernanceArtifact[]>("/api/v1/governance/artifacts", {}, scope),
+      request<GovernanceRisk[]>("/api/v1/governance/risks", {}, scope),
+      request<EvaluationRun[]>("/api/v1/governance/evaluations", {}, scope),
+      request<HumanReview[]>("/api/v1/governance/reviews", {}, scope)
     ]);
-    setDigestPreference((await preferenceResponse.json()) as DigestPreference | null);
-    setNotifications((await notificationResponse.json()) as Notification[]);
+    setGovernance({ summary, artifacts, risks, evaluations, reviews });
   }
 
-  async function loadGovernance(activeToken = token, activeTenant = tenant?.id) {
-    if (!activeToken || !activeTenant) return;
-    const [summaryResponse, artifactResponse, riskResponse, evaluationResponse, reviewResponse] = await Promise.all([
-      api("/api/v1/governance/summary", {}, activeToken, activeTenant),
-      api("/api/v1/governance/artifacts", {}, activeToken, activeTenant),
-      api("/api/v1/governance/risks", {}, activeToken, activeTenant),
-      api("/api/v1/governance/evaluations", {}, activeToken, activeTenant),
-      api("/api/v1/governance/reviews", {}, activeToken, activeTenant)
+  async function loadDigests(scope: Session | undefined = auth) {
+    if (!scope) return;
+    const [preference, delivered] = await Promise.all([
+      request<DigestPreference | null>("/api/v1/digests/preference", {}, scope),
+      request<Notification[]>("/api/v1/digests/notifications", {}, scope)
     ]);
-    setGovernance({
-      summary: (await summaryResponse.json()) as GovernanceSummary,
-      artifacts: (await artifactResponse.json()) as GovernanceArtifact[],
-      risks: (await riskResponse.json()) as GovernanceRisk[],
-      evaluations: (await evaluationResponse.json()) as EvaluationRun[],
-      reviews: (await reviewResponse.json()) as HumanReview[]
-    });
+    setDigestPreference(preference);
+    setNotifications(delivered);
   }
 
-  async function authenticate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError("");
-    const form = new FormData(event.currentTarget);
+  async function loadWorkspace(scope: Session) {
+    const [nextAccounts, ledger] = await Promise.all([request<Account[]>("/api/v1/accounts", {}, scope), fetchLedger(scope)]);
+    setAccounts(nextAccounts);
+    setTransactions(ledger.items);
+    setTransactionTotal(ledger.total);
+    const known = ledger.items.find((item) => item.balance_minor !== null);
+    if (known) setConfig({ asOf: known.transaction_date });
+    const results = await Promise.allSettled([loadGovernance(scope), loadDigests(scope)]);
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed) push({ tone: "error", title: "Some workspace panels could not load", body: message(failed.reason, "Governance or digest data is unavailable") });
+  }
+
+  async function openSession(token: string) {
+    const me = await request<{ tenants: Tenant[] }>("/api/v1/auth/me", {}, { token });
+    if (!me.tenants.length) throw new Error("No household membership is available");
+    const tenant = me.tenants[0];
+    const scope = { token, tenantId: tenant.id };
+    return { scope, tenant };
+  }
+
+  /* ---------- authentication ---------- */
+
+  async function authenticate(mode: "login" | "register", form: FormData) {
+    setBusy("auth");
+    setAuthError("");
     try {
-      const path = authMode === "register" ? "/api/v1/auth/register" : "/api/v1/auth/login";
-      const body = authMode === "register"
+      const body = mode === "register"
         ? { email: form.get("email"), password: form.get("password"), household_name: form.get("household") }
         : { email: form.get("email"), password: form.get("password") };
-      const login = await api(path, { method: "POST", body: JSON.stringify(body) }, "", undefined);
-      const accessToken = ((await login.json()) as { access_token: string }).access_token;
-      const identity = await api("/api/v1/auth/me", {}, accessToken, undefined);
-      const me = (await identity.json()) as { tenants: Tenant[] };
-      if (!me.tenants.length) throw new Error("No household membership is available");
-      setToken(accessToken); setTenant(me.tenants[0]);
-      await loadWorkspace(accessToken, me.tenants[0]);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Authentication failed"); }
-    finally { setBusy(false); }
+      const { access_token: token } = await request<{ access_token: string }>(`/api/v1/auth/${mode}`, { method: "POST", body: JSON.stringify(body) });
+      const { scope, tenant } = await openSession(token);
+      await loadWorkspace(scope);
+      setSession({ token, tenant });
+      navigate("overview");
+    } catch (caught) {
+      setAuthError(message(caught, "Authentication failed"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function startDemo() {
+    setBusy("demo");
+    setAuthError("");
+    try {
+      const identity = syntheticIdentity();
+      const { access_token: token } = await request<{ access_token: string }>("/api/v1/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ email: identity.email, password: identity.password, household_name: identity.household })
+      });
+      const { scope, tenant } = await openSession(token);
+      const account = await request<Account>("/api/v1/accounts", {
+        method: "POST",
+        body: JSON.stringify({ name: SAMPLE_STATEMENT.accountName, currency: "INR", external_reference: SAMPLE_STATEMENT.externalReference })
+      }, scope);
+      const result = await uploadStatement(scope, account.id, await sampleFile());
+      setUploadResult(result);
+      await loadWorkspace(scope);
+      setSession({ token, tenant });
+      setDemoIdentity({ email: identity.email, password: identity.password });
+      navigate("overview");
+      push({ tone: "success", title: "Synthetic household ready", body: `${result.accepted_rows} rows imported · ${result.duplicate_rows} duplicate · ${result.rejected_rows} rejected. Next: Run analysis.` });
+    } catch (caught) {
+      setAuthError(message(caught, "Could not start the synthetic demo"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function signOut() {
+    setSession(null);
+    setDemoIdentity(null);
+    setAccounts([]);
+    setTransactions([]);
+    setTransactionTotal(0);
+    setUploadResult(null);
+    setSnapshot(null);
+    setForecast(null);
+    setScenario(null);
+    setAgentRun(null);
+    setVisibleEvents(0);
+    setGovernance(null);
+    setDigestPreference(null);
+    setNotifications([]);
+    setConfigState(INITIAL_CONFIG);
+    setQuestion(DEFAULT_QUESTION);
+    setView("overview");
+    setPublicView("auth");
+  }
+
+  /* ---------- ledger ---------- */
+
+  async function ensureAccount(scope: Session) {
+    if (accounts[0]) return accounts[0];
+    const account = await request<Account>("/api/v1/accounts", {
+      method: "POST",
+      body: JSON.stringify({ name: "Primary account", currency: "INR", external_reference: crypto.randomUUID() })
+    }, scope);
+    setAccounts([account]);
+    return account;
   }
 
   async function createAccount() {
-    setBusy(true); setError("");
+    if (!auth) return;
+    setBusy("account");
     try {
-      const response = await api("/api/v1/accounts", { method: "POST", body: JSON.stringify({ name: "Primary account", currency: "INR", external_reference: crypto.randomUUID() }) });
-      setAccounts([(await response.json()) as Account]);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not create account"); }
-    finally { setBusy(false); }
+      await ensureAccount(auth);
+      push({ tone: "success", title: "Primary account created", body: "An empty INR ledger — import a statement next." });
+    } catch (caught) {
+      push({ tone: "error", title: "Could not create account", body: message(caught, "Unexpected account error") });
+    } finally {
+      setBusy(null);
+    }
   }
 
-  async function uploadStatement() {
-    const file = fileRef.current?.files?.[0];
-    if (!file || !accounts[0] || !tenant) return;
-    setUploadFileName(file.name);
-    setBusy(true); setError("");
+  async function importFile(file: File | "sample") {
+    if (!auth) return;
+    setBusy("upload");
     try {
-      const body = new FormData(); body.set("mapping", DEFAULT_MAPPING); body.set("file", file);
-      const response = await api(`/api/v1/accounts/${accounts[0].id}/transaction-uploads`, { method: "POST", body });
-      const result = (await response.json()) as { accepted_rows: number; rejected_rows: number; duplicate_rows: number; replayed: boolean };
-      setUploadSummary(`${result.accepted_rows} accepted · ${result.duplicate_rows} duplicate · ${result.rejected_rows} rejected${result.replayed ? " · replay" : ""}`);
-      await loadWorkspace(token, tenant);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Import failed"); }
-    finally { setBusy(false); }
+      const account = await ensureAccount(auth);
+      const result = await uploadStatement(auth, account.id, file === "sample" ? await sampleFile() : file);
+      setUploadResult(result);
+      setSnapshot(null);
+      setForecast(null);
+      setScenario(null);
+      await loadWorkspace(auth);
+      push({
+        tone: result.rejected_rows && !result.accepted_rows ? "error" : "success",
+        title: result.replayed ? "Statement already imported" : "Statement imported",
+        body: `${result.accepted_rows} accepted · ${result.duplicate_rows} duplicate · ${result.rejected_rows} rejected`
+      });
+    } catch (caught) {
+      push({ tone: "error", title: "Import failed", body: message(caught, "The statement could not be imported") });
+    } finally {
+      setBusy(null);
+    }
   }
 
-  async function runFinPilot() {
-    if (!accounts[0] || !asOf) { setError("Import data with a known balance and select its balance date first"); return; }
-    setBusy(true); setError(""); setAgentRun(null); setVisibleEvents(0);
+  async function correctCategory(transaction: Transaction, category: string, reason: string) {
+    if (!auth) return false;
+    setBusy("correction");
     try {
-      const snapshotResponse = await api("/api/v1/analytics/snapshots", { method: "POST", body: JSON.stringify({ account_id: accounts[0].id, as_of: asOf }) });
-      const nextSnapshot = (await snapshotResponse.json()) as Snapshot;
-      const forecastResponse = await api("/api/v1/analytics/forecasts", { method: "POST", body: JSON.stringify({ snapshot_id: nextSnapshot.id, horizon_days: horizon }) });
-      const nextForecast = (await forecastResponse.json()) as Forecast;
-      let nextScenario: Scenario | null = null;
-      if (scenarioAmount && scenarioDate) {
-        const scenarioResponse = await api("/api/v1/analytics/scenarios", { method: "POST", body: JSON.stringify({ forecast_id: nextForecast.id, name: "Planned purchase", shocks: [{ day: scenarioDate, amount_minor: -minorFromRupees(scenarioAmount), label: "Planned purchase" }] }) });
-        nextScenario = (await scenarioResponse.json()) as Scenario;
+      const updated = await request<Transaction>(`/api/v1/transactions/${transaction.id}/category`, { method: "PATCH", body: JSON.stringify({ category, reason }) }, auth);
+      setTransactions((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      push({ tone: "success", title: "Correction recorded", body: `${humanize(transaction.category)} → ${humanize(category)}. Re-run analysis to version a new snapshot.` });
+      return true;
+    } catch (caught) {
+      push({ tone: "error", title: "Correction failed", body: message(caught, "Could not save the correction") });
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /* ---------- analysis & advice ---------- */
+
+  async function runAnalysis(): Promise<{ forecast: Forecast; scenario: Scenario | null } | null> {
+    if (!auth || !accounts[0] || !transactions.length) {
+      push({ tone: "error", title: "Import a statement first", body: "The analysis needs persisted ledger rows." });
+      return null;
+    }
+    if (!config.asOf) {
+      push({ tone: "error", title: "Choose a known-balance date", body: "The latest transaction on that date must carry a source balance." });
+      return null;
+    }
+    let shockMinor = 0;
+    if (config.scenarioEnabled) {
+      try {
+        shockMinor = minorFromRupees(config.scenarioAmount);
+      } catch (caught) {
+        push({ tone: "error", title: "Check the purchase amount", body: message(caught, "Invalid amount") });
+        return null;
       }
-      const runResponse = await api("/api/v1/agent-runs", { method: "POST", body: JSON.stringify({ forecast_id: nextForecast.id, scenario_id: nextScenario?.id ?? null, question }) });
-      const nextRun = (await runResponse.json()) as AgentRun;
-      setSnapshot(nextSnapshot); setForecast(nextForecast); setScenario(nextScenario); setAgentRun(nextRun);
-      await loadGovernance();
-      setVisibleEvents(1); setView("advice");
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "FinPilot run failed safely"); }
-    finally { setBusy(false); }
+    }
+    setBusy("analysis");
+    try {
+      const nextSnapshot = await request<Snapshot>("/api/v1/analytics/snapshots", { method: "POST", body: JSON.stringify({ account_id: accounts[0].id, as_of: config.asOf }) }, auth);
+      setSnapshot(nextSnapshot);
+      const nextForecast = await request<Forecast>("/api/v1/analytics/forecasts", { method: "POST", body: JSON.stringify({ snapshot_id: nextSnapshot.id, horizon_days: config.horizon }) }, auth);
+      setForecast(nextForecast);
+      let nextScenario: Scenario | null = null;
+      if (config.scenarioEnabled && shockMinor > 0) {
+        const label = config.scenarioName.trim() || "Planned purchase";
+        nextScenario = await request<Scenario>("/api/v1/analytics/scenarios", {
+          method: "POST",
+          body: JSON.stringify({ forecast_id: nextForecast.id, name: label, shocks: [{ day: config.scenarioDate, amount_minor: -shockMinor, label }] })
+        }, auth);
+      }
+      setScenario(nextScenario);
+      push({
+        tone: nextScenario?.first_shortfall_date ? "error" : "success",
+        title: nextScenario?.first_shortfall_date ? "Analysis complete — shortfall projected" : "Analysis complete",
+        body: `${nextSnapshot.recurring_patterns.length} recurring patterns · ${nextSnapshot.anomaly_results.length} anomalies · low point ${compactMoney(nextScenario?.minimum_balance_minor ?? nextForecast.minimum_balance_minor)}`
+      });
+      return { forecast: nextForecast, scenario: nextScenario };
+    } catch (caught) {
+      push({ tone: "error", title: "Analysis stopped safely", body: message(caught, "Could not calculate the forecast") });
+      return null;
+    } finally {
+      setBusy(null);
+    }
   }
+
+  async function askAdvisor(input?: { forecast: Forecast; scenario: Scenario | null }) {
+    const baseline = input?.forecast ?? forecast;
+    const branch = input ? input.scenario : scenario;
+    if (!auth || !baseline) {
+      push({ tone: "error", title: "Run the analysis first", body: "The advisor only reasons over a versioned forecast." });
+      return;
+    }
+    setBusy("advisor");
+    setAgentRun(null);
+    setVisibleEvents(0);
+    setInspectorOpen(true);
+    try {
+      const run = await request<AgentRun>("/api/v1/agent-runs", { method: "POST", body: JSON.stringify({ forecast_id: baseline.id, scenario_id: branch?.id ?? null, question }) }, auth);
+      setAgentRun(run);
+      setVisibleEvents(1);
+      navigate("advice");
+      await loadGovernance(auth).catch(() => undefined);
+      push({ tone: run.verification_status === "accept" ? "success" : "error", title: run.verification_status === "accept" ? "Advice verified and released" : "Advice withheld by the verifier", body: `${run.events.length} events persisted · ${run.recommendations.length} recommendations` });
+    } catch (caught) {
+      push({ tone: "error", title: "Advisor step failed safely", body: message(caught, "No advice was released") });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runPipeline() {
+    const result = await runAnalysis();
+    if (result) await askAdvisor(result);
+  }
+
+  /* ---------- governance & digests ---------- */
 
   async function createGovernanceDemo() {
-    setBusy(true); setError("");
+    if (!auth) return;
+    setBusy("governance");
     try {
-      await api("/api/v1/governance/demo-review", { method: "POST", body: "{}" });
-      await loadGovernance(); setView("governance");
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not create governance demo"); }
-    finally { setBusy(false); }
+      await request("/api/v1/governance/demo-review", { method: "POST", body: "{}" }, auth);
+      await loadGovernance(auth);
+      push({ tone: "info", title: "Synthetic review case created", body: "An automatically rejected recommendation is waiting for a reviewer." });
+    } catch (caught) {
+      push({ tone: "error", title: "Could not create the governance demo", body: message(caught, "Unexpected governance error") });
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function rejectReview(reviewId: string) {
-    setBusy(true); setError("");
+    if (!auth) return;
+    setBusy("governance");
     try {
-      await api(`/api/v1/governance/reviews/${reviewId}/decisions`, { method: "POST", body: JSON.stringify({ outcome: "reject", reason: "Unsafe guarantee remains forbidden; deterministic controls cannot be overridden." }) });
-      await loadGovernance();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not record governance decision"); }
-    finally { setBusy(false); }
+      await request(`/api/v1/governance/reviews/${reviewId}/decisions`, { method: "POST", body: JSON.stringify({ outcome: "reject", reason: "Unsafe guarantee remains forbidden; deterministic controls cannot be overridden." }) }, auth);
+      await loadGovernance(auth);
+      push({ tone: "success", title: "Reviewer decision recorded", body: "The rejection is stored with exact artifact lineage." });
+    } catch (caught) {
+      push({ tone: "error", title: "Could not record the decision", body: message(caught, "Unexpected governance error") });
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function saveDigestPreference(enabled: boolean) {
-    setBusy(true); setError("");
+    if (!auth) return;
+    setBusy("digest");
     try {
-      await api("/api/v1/digests/preference", {
-        method: "PUT",
-        body: JSON.stringify({ enabled, weekday: 0, local_time: "09:00", timezone: "Asia/Kolkata" })
-      });
-      await loadDigests(); setView("digests");
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not update digest schedule"); }
-    finally { setBusy(false); }
+      await request("/api/v1/digests/preference", { method: "PUT", body: JSON.stringify({ enabled, weekday: 0, local_time: "09:00", timezone: "Asia/Kolkata" }) }, auth);
+      await loadDigests(auth);
+      push({ tone: "success", title: enabled ? "Weekly digest enabled" : "Weekly digest disabled" });
+    } catch (caught) {
+      push({ tone: "error", title: "Could not update the digest schedule", body: message(caught, "Unexpected digest error") });
+    } finally {
+      setBusy(null);
+    }
   }
+
+  /* ---------- effects ---------- */
 
   useEffect(() => {
     if (!agentRun || visibleEvents <= 0 || visibleEvents >= agentRun.events.length) return;
@@ -259,78 +420,102 @@ export function ProductConsole() {
     return () => window.clearTimeout(timer);
   }, [agentRun, visibleEvents]);
 
-  const metrics = useMemo(() => {
-    const included = transactions.filter((item) => !item.is_excluded_from_cashflow);
-    const income = included.filter((item) => item.amount_minor > 0 && item.kind !== "refund").reduce((sum, item) => sum + item.amount_minor, 0);
-    const spend = included.filter((item) => item.amount_minor < 0).reduce((sum, item) => sum + Math.abs(item.amount_minor), 0);
-    const savings = income - spend; const rate = income ? Math.round((Math.max(savings, 0) / income) * 100) : 0;
-    const categories = new Map<string, number>();
-    included.filter((item) => item.amount_minor < 0).forEach((item) => categories.set(item.category, (categories.get(item.category) ?? 0) + Math.abs(item.amount_minor)));
-    return { income, spend, savings, rate, categories: [...categories.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6) };
-  }, [transactions]);
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
-  const completed = new Set<string>();
+  /* ---------- render ---------- */
+
+  if (!session) {
+    return (
+      <>
+        {publicView === "system" ? (
+          <div className="public-shell">
+            <header className="auth-topbar"><Brand /><button className="btn btn-glass" onClick={() => setPublicView("auth")}><Icon name="chevronLeft" size={14} />Back to sign in</button></header>
+            <SystemMap agentRun={null} visibleEvents={0} setVisibleEvents={() => undefined} />
+          </div>
+        ) : (
+          <AuthScreen busy={busy === "auth" || busy === "demo" ? busy : null} error={authError} onAuthenticate={authenticate} onStartDemo={startDemo} onShowSystem={() => setPublicView("system")} />
+        )}
+        <ToastStack toasts={toasts} dismiss={dismiss} />
+      </>
+    );
+  }
+
+  const completed = new Set<StageId>();
   if (transactions.length) { completed.add("import"); completed.add("categorize"); }
   if (snapshot) completed.add("analyze");
   if (forecast) completed.add("forecast");
   if (agentRun) completed.add("advise");
   if (agentRun?.verification_status === "accept") completed.add("verify");
 
-  return <div className="fp-app">
-    <header className="fp-topbar"><div className="fp-brand"><span>⌁</span><strong>FinPilot</strong><em>TRACK 02</em></div><div className="fp-mode"><button className={mode === "live" ? "active" : ""} onClick={() => setMode("live")}>Live workspace</button><button className={mode === "system" ? "active" : ""} onClick={() => setMode("system")}>How it works</button></div><div className="fp-header-meta"><span>Mesh-only AI</span>{tenant ? <b>{tenant.name}</b> : <b>Synthetic-safe</b>}</div></header>
+  const meta = VIEWS.find((item) => item.id === view) ?? VIEWS[0];
+  const working = busy !== null;
+  const canAnalyse = Boolean(accounts[0] && transactions.length && config.asOf);
 
-    {mode === "system" ? <SystemMap agentRun={agentRun} visibleEvents={visibleEvents} setVisibleEvents={setVisibleEvents} /> : !token || !tenant ? <main className="fp-auth-layout"><section><p className="fp-kicker">NEURO-SYMBOLIC FINANCIAL DECISION INTELLIGENCE</p><h1>See the math.<br />Watch the agents.<br /><span>Trust the evidence.</span></h1><p>Import a real statement, branch a what-if scenario, and inspect every deterministic calculation and Mesh-powered handoff.</p><div className="fp-trust-row"><span>Exact money math</span><span>Tenant isolation</span><span>Fail-closed advice</span></div></section><form className="fp-auth-panel" onSubmit={authenticate}><div className="fp-auth-toggle"><button type="button" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Sign in</button><button type="button" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Register</button></div><h2>{authMode === "login" ? "Continue to your household" : "Create a private household"}</h2>{authMode === "register" && <label>Household name<input name="household" required /></label>}<label>Email<input name="email" type="email" required /></label><label>Password<input name="password" type="password" minLength={12} required /></label><button className="fp-primary" disabled={busy}>{busy ? "Authenticating…" : authMode === "login" ? "Open workspace" : "Create household"}</button>{error && <p className="fp-error">{error}</p>}<small>Short-lived access tokens stay in memory. Financial data is never sent to the browser without tenant authorization.</small></form></main> : <main className="fp-workspace">
-      <aside className="fp-sidebar"><div className="fp-household"><div><span>{tenant.name.slice(0, 2).toUpperCase()}</span><div><b>{tenant.name}</b><small>{tenant.role} · private workspace</small></div></div><p>{transactions.length ? `${transactions.length} verified ledger rows` : "Ready for your first statement"}</p></div><div className="fp-ring-card"><div className="fp-ring" style={{ "--rate": `${metrics.rate * 3.6}deg` } as CSSProperties}><b>{metrics.rate}%</b></div><dl><div><dt>Income</dt><dd>{money(metrics.income)}</dd></div><div><dt>Spend</dt><dd>{money(metrics.spend)}</dd></div><div><dt>Net</dt><dd className={metrics.savings >= 0 ? "positive" : "negative"}>{money(metrics.savings)}</dd></div></dl></div>{!accounts.length ? <button className="fp-upload" onClick={createAccount} disabled={busy}><span>＋</span><b>Create primary account</b><small>No balance will be invented</small></button> : <label className="fp-upload"><span>⇧</span><b>{uploadFileName || "Upload transactions"}</b><small>{uploadSummary || "CSV · explicit bank mapping"}</small><input ref={fileRef} type="file" accept=".csv,text/csv" onChange={uploadStatement} /></label>}<button className="fp-run" onClick={runFinPilot} disabled={busy || !transactions.length}>{busy ? "Running secure pipeline…" : "▷ Run FinPilot"}</button><div className="fp-controls"><label>Balance date<input type="date" value={asOf} onChange={(event) => setAsOf(event.target.value)} /></label><label>Horizon<select value={horizon} onChange={(event) => setHorizon(Number(event.target.value))}><option value={30}>30 days</option><option value={60}>60 days</option><option value={90}>90 days</option></select></label><label>Purchase date<input type="date" value={scenarioDate} onChange={(event) => setScenarioDate(event.target.value)} /></label><label>Purchase amount (₹)<input value={scenarioAmount} onChange={(event) => setScenarioAmount(event.target.value)} inputMode="decimal" /></label></div><div className="fp-stage-list">{stages.map(([id, label]) => <div key={id} className={completed.has(id) ? "done" : ""}><span>{completed.has(id) ? "✓" : "○"}</span>{label}</div>)}</div></aside>
+  const commands: Command[] = [
+    ...VIEWS.map((item) => ({ id: `view-${item.id}`, label: item.label, group: "Go to", icon: item.icon, run: () => navigate(item.id) })),
+    { id: "sample", label: "Load synthetic sample statement", group: "Actions", icon: "bolt", disabled: working, run: () => void importFile("sample") },
+    { id: "analysis", label: "Run deterministic analysis", group: "Actions", icon: "play", disabled: working || !canAnalyse, run: () => { navigate("forecast"); void runAnalysis(); } },
+    { id: "advisor", label: "Ask the verified advisor", group: "Actions", icon: "advice", disabled: working || !forecast, run: () => void askAdvisor() },
+    { id: "inspector", label: inspectorOpen ? "Hide agent log" : "Show agent log", group: "Actions", icon: "terminal", run: () => setInspectorOpen((open) => !open) },
+    { id: "download", label: "Download sample CSV", group: "Actions", icon: "download", run: () => { const link = document.createElement("a"); link.href = SAMPLE_STATEMENT.path; link.download = SAMPLE_STATEMENT.filename; link.click(); } },
+    { id: "theme-light", label: "Light appearance", group: "Appearance", icon: "sun", run: () => setThemePreference("light") },
+    { id: "theme-dark", label: "Dark appearance", group: "Appearance", icon: "moon", run: () => setThemePreference("dark") },
+    { id: "theme-system", label: "Match system appearance", group: "Appearance", icon: "monitor", run: () => setThemePreference("system") },
+    { id: "sign-out", label: "Sign out", group: "Account", icon: "logout", run: signOut }
+  ];
 
-      <section className="fp-main"><nav className="fp-tabs">{(["overview", "ledger", "forecast", "advice", "audit", "digests", "governance"] as View[]).map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}</nav><div className="fp-pipeline">{stages.slice(1).map(([id, label], index) => <div key={id} className={completed.has(id) ? "done" : ""}><i>{index + 1}</i><span>{label}</span>{index < stages.length - 2 && <b>›</b>}</div>)}</div>{error && <p className="fp-error fp-wide-error">{error}</p>}
-        {view === "overview" && <Overview metrics={metrics} snapshot={snapshot} transactions={transactions} />}
-        {view === "ledger" && <Ledger transactions={transactions} />}
-        {view === "forecast" && <ForecastView snapshot={snapshot} forecast={forecast} scenario={scenario} />}
-        {view === "advice" && <AdviceView run={agentRun} question={question} setQuestion={setQuestion} visibleEvents={visibleEvents} />}
-        {view === "audit" && <AuditView run={agentRun} />}
-        {view === "digests" && <DigestView preference={digestPreference} notifications={notifications} busy={busy} savePreference={saveDigestPreference} />}
-        {view === "governance" && <GovernanceView data={governance} busy={busy} createDemo={createGovernanceDemo} rejectReview={rejectReview} />}
-      </section>
+  return (
+    <div className={`app-shell ${inspectorOpen ? "inspector-open" : ""}`}>
+      <Sidebar
+        tenant={session.tenant}
+        view={view}
+        open={sidebarOpen}
+        badges={{ ledger: transactionTotal, governance: governance?.summary.pending_reviews, advice: agentRun?.recommendations.length }}
+        completed={completed}
+        demoIdentity={demoIdentity}
+        onNavigate={navigate}
+        onClose={() => setSidebarOpen(false)}
+        onSignOut={signOut}
+      />
+      {sidebarOpen && <div className="scrim" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
 
-      <aside className="fp-agent-log"><header><span>›_</span><b>Agent log</b><em>{busy ? "running" : agentRun ? "persisted" : "idle"}</em></header><div>{!agentRun ? <p>{"// waiting for a verified run"}<br />{"// configure the inputs and press Run FinPilot"}</p> : agentRun.events.slice(0, visibleEvents).map((event) => <article key={event.id}><time>[{String(event.sequence).padStart(2, "0")}]</time><b>{event.node}</b><p>{event.summary}</p>{event.model_id && <span>Mesh API · {event.model_id} · {event.output_tokens ?? 0} tok · {event.latency_ms ?? 0} ms</span>}</article>)}</div>{agentRun && <footer>LLM tokens {agentRun.total_input_tokens + agentRun.total_output_tokens} · {agentRun.total_latency_ms} ms</footer>}</aside>
-    </main>}
-  </div>;
-}
+      <main className="app-main">
+        <header className="glass toolbar">
+          <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Icon name="sidebar" size={17} /></button>
+          <div className="toolbar-title"><h1>{meta.label}</h1><small>{meta.subtitle}</small></div>
+          <button className="search-trigger" onClick={() => setPaletteOpen(true)} aria-label="Open command palette"><Icon name="search" size={15} /><span>Search or jump to…</span><Kbd>⌘K</Kbd></button>
+          <ThemeToggle />
+          <button className={`icon-btn ${inspectorOpen ? "active" : ""}`} onClick={() => setInspectorOpen((open) => !open)} aria-label="Toggle agent log" aria-pressed={inspectorOpen}><Icon name="terminal" size={17} />{agentRun && <span className="badge-dot" />}</button>
+          <button className="btn btn-primary run-btn" onClick={runPipeline} disabled={working || !canAnalyse} title="Deterministic analysis, then the Mesh-powered advisor graph">
+            <Icon name={working ? "refresh" : "play"} size={13} className={working ? "spin" : ""} />
+            <span>{busy === "analysis" ? "Analysing…" : busy === "advisor" ? "Agents working…" : "Run FinPilot"}</span>
+          </button>
+        </header>
 
-function Overview({ metrics, snapshot, transactions }: { metrics: { income: number; spend: number; savings: number; rate: number; categories: [string, number][] }; snapshot: Snapshot | null; transactions: Transaction[] }) {
-  const max = Math.max(...metrics.categories.map((item) => item[1]), 1);
-  return <div className="fp-content"><div className="fp-summary-grid"><article><span>Cash in</span><strong>{money(metrics.income)}</strong><small>Imported, transfer-adjusted</small></article><article><span>Cash out</span><strong>{money(metrics.spend)}</strong><small>Refunds and transfers separated</small></article><article><span>Net cash flow</span><strong className={metrics.savings >= 0 ? "positive" : "negative"}>{money(metrics.savings)}</strong><small>{metrics.rate}% retained</small></article><article><span>Data confidence</span><strong>{transactions.length ? "Source-backed" : "No data"}</strong><small>{snapshot ? `Snapshot ${snapshot.id.slice(0, 8)}` : "Run analysis to version evidence"}</small></article></div><div className="fp-two-col"><article className="fp-panel"><header><div><span className="fp-kicker">SPEND INTELLIGENCE</span><h2>Category movement</h2></div><small>Exact imported amounts</small></header>{metrics.categories.length ? <div className="fp-bars">{metrics.categories.map(([category, value]) => <div key={category}><label><span>{category.replaceAll("_", " ")}</span><b>{money(value)}</b></label><i><b style={{ width: `${(value / max) * 100}%` }} /></i></div>)}</div> : <p className="fp-empty">Upload a statement to calculate category movement.</p>}</article><article className="fp-panel"><header><div><span className="fp-kicker">DETERMINISTIC FINDINGS</span><h2>Signals worth reviewing</h2></div><small>MAD + recurrence</small></header>{snapshot ? <div className="fp-findings"><div><span>↻</span><p><b>{snapshot.recurring_patterns.length} recurring patterns</b><small>Backed by repeated merchant/date evidence</small></p></div><div><span>!</span><p><b>{snapshot.anomaly_results.length} robust anomalies</b><small>Sparse categories stay unflagged</small></p></div></div> : <p className="fp-empty">Run FinPilot to create a versioned analysis snapshot.</p>}</article></div></div>;
-}
+        <div className={`view ${working ? "is-busy" : ""}`} key={view}>
+          {view === "overview" && <Overview insights={insights} transactions={transactions} snapshot={snapshot} hasAccount={accounts.length > 0} busy={working} onNavigate={navigate} onLoadSample={() => void importFile("sample")} onRunAnalysis={() => void runAnalysis()} />}
+          {view === "ledger" && <Ledger transactions={transactions} total={transactionTotal} hasAccount={accounts.length > 0} busy={working} uploadResult={uploadResult} onUpload={(file) => void importFile(file)} onLoadSample={() => void importFile("sample")} onCreateAccount={() => void createAccount()} onCorrect={correctCategory} />}
+          {view === "forecast" && <ForecastView config={config} setConfig={setConfig} snapshot={snapshot} forecast={forecast} scenario={scenario} canRun={canAnalyse} busy={working} onRunAnalysis={() => void runAnalysis()} onAskAdvisor={() => void askAdvisor()} />}
+          {view === "advice" && <AdvisorView run={agentRun} forecast={forecast} question={question} setQuestion={setQuestion} visibleEvents={visibleEvents} busy={working} onAsk={() => void askAdvisor()} />}
+          {view === "audit" && <AuditView run={agentRun} />}
+          {view === "governance" && <GovernanceView data={governance} busy={working} createDemo={() => void createGovernanceDemo()} rejectReview={(id) => void rejectReview(id)} />}
+          {view === "digests" && <DigestView preference={digestPreference} notifications={notifications} busy={working} savePreference={(enabled) => void saveDigestPreference(enabled)} />}
+          {view === "system" && <SystemMap agentRun={agentRun} visibleEvents={visibleEvents} setVisibleEvents={setVisibleEvents} />}
+        </div>
+      </main>
 
-function Ledger({ transactions }: { transactions: Transaction[] }) {
-  return <div className="fp-panel fp-ledger"><header><div><span className="fp-kicker">TRANSACTION TRUTH</span><h2>{transactions.length} persisted rows</h2></div><small>Human corrections retain lineage</small></header>{transactions.length ? <table><thead><tr><th>Date</th><th>Merchant</th><th>Category</th><th>Provenance</th><th>Amount</th></tr></thead><tbody>{transactions.map((item) => <tr key={item.id}><td>{item.transaction_date}</td><td><b>{item.merchant_normalized}</b><small>{item.description}</small></td><td><span className="fp-tag">{item.category}</span></td><td>{item.classification_method}<small>{(item.classification_confidence_bps / 100).toFixed(0)}% confidence</small></td><td className={item.amount_minor >= 0 ? "positive" : "negative"}>{money(item.amount_minor, item.currency)}{item.is_excluded_from_cashflow && <small>excluded transfer</small>}</td></tr>)}</tbody></table> : <p className="fp-empty">No ledger rows yet.</p>}</div>;
-}
-
-function ForecastView({ snapshot, forecast, scenario }: { snapshot: Snapshot | null; forecast: Forecast | null; scenario: Scenario | null }) {
-  if (!snapshot || !forecast) return <div className="fp-empty-stage"><span>↗</span><h2>No forecast yet</h2><p>Select a known-balance date and run the secure pipeline.</p></div>;
-  return <div className="fp-content"><div className="fp-summary-grid"><article><span>Opening balance</span><strong>{money(forecast.opening_balance_minor, snapshot.currency)}</strong><small>{snapshot.as_of}</small></article><article><span>Baseline minimum</span><strong>{money(forecast.minimum_balance_minor, snapshot.currency)}</strong><small>{forecast.horizon_days}-day horizon</small></article><article><span>Scenario minimum</span><strong>{scenario ? money(scenario.minimum_balance_minor, snapshot.currency) : "Not run"}</strong><small>{scenario?.first_shortfall_date ? `Shortfall ${scenario.first_shortfall_date}` : scenario ? "No projected shortfall" : "Optional what-if"}</small></article><article><span>Scenario delta</span><strong>{scenario ? money(scenario.ending_delta_minor, snapshot.currency) : "—"}</strong><small>Baseline remains immutable</small></article></div><article className="fp-panel"><header><div><span className="fp-kicker">DAILY CASH-FLOW</span><h2>Baseline vs. what-if</h2></div><small>Integer minor-unit engine</small></header><BalanceChart baseline={forecast.points} scenario={scenario?.points} /><ul className="fp-assumptions">{forecast.assumptions.map((item) => <li key={item}>{item}</li>)}</ul></article></div>;
-}
-
-function AdviceView({ run, question, setQuestion, visibleEvents }: { run: AgentRun | null; question: string; setQuestion: (value: string) => void; visibleEvents: number }) {
-  return <div className="fp-content"><article className="fp-panel fp-question"><header><div><span className="fp-kicker">FINANCIAL COPILOT</span><h2>Ask against verified evidence</h2></div><small>No model arithmetic</small></header><textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={3} maxLength={1000} /><p>Questions are treated as untrusted input. Run FinPilot to execute the graph.</p></article>{!run ? <div className="fp-empty-stage"><span>◇</span><h2>No recommendation run yet</h2><p>The advisor only activates after a versioned forecast exists.</p></div> : <><div className="fp-verdict"><span className={run.verification_status === "accept" ? "pass" : "fail"}>{run.verification_status === "accept" ? "✓ VERIFIED" : "× WITHHELD"}</span><div><b>{run.status}</b><small>{run.model_id} · {run.revision_attempts} revision attempts · {visibleEvents}/{run.events.length} events replayed</small></div></div><div className="fp-rec-grid">{run.recommendations.map((item) => <article key={item.id}><header><span>OPTION {item.rank}</span><em>{(item.confidence_bps / 100).toFixed(0)}%</em></header><h3>{item.title}</h3><p>{item.explanation}</p>{item.amount_minor !== null && <strong>{money(item.amount_minor, item.currency)}</strong>}<details><summary>Evidence & assumptions</summary><small>Evidence: {item.evidence_ids.join(", ")}</small><small>{item.assumptions.join(" · ") || "No additional assumptions"}</small></details></article>)}</div></>}</div>;
-}
-
-function AuditView({ run }: { run: AgentRun | null }) {
-  if (!run) return <div className="fp-empty-stage"><span>≡</span><h2>No audit timeline yet</h2><p>Every completed and rejected node will appear here.</p></div>;
-  return <div className="fp-panel fp-timeline"><header><div><span className="fp-kicker">IMMUTABLE DECISION TRAIL</span><h2>Execution {run.id.slice(0, 8)}</h2></div><small>{run.verification_status}</small></header>{run.events.map((event) => <article key={event.id}><i>{event.sequence}</i><div><span>{event.event_type}</span><h3>{event.node}</h3><p>{event.summary}</p></div><aside>{event.model_id ? <><b>{event.model_id}</b><small>{event.input_tokens ?? 0} in · {event.output_tokens ?? 0} out</small><small>{event.latency_ms ?? 0} ms</small></> : <><b>Deterministic</b><small>No model call</small></>}</aside></article>)}</div>;
-}
-
-function DigestView({ preference, notifications, busy, savePreference }: { preference: DigestPreference | null; notifications: Notification[]; busy: boolean; savePreference: (enabled: boolean) => Promise<void> }) {
-  return <div className="fp-content"><div className="fp-summary-grid"><article><span>Weekly digest</span><strong className={preference?.enabled ? "positive" : ""}>{preference?.enabled ? "ACTIVE" : "OFF"}</strong><small>Persisted schedule state</small></article><article><span>Delivery channel</span><strong>IN-APP</strong><small>Guaranteed base adapter</small></article><article><span>Delivered</span><strong>{notifications.length}</strong><small>Deduplicated notifications</small></article><article><span>Next eligibility</span><strong>{preference?.next_due_at ? new Date(preference.next_due_at).toLocaleDateString() : "Not set"}</strong><small>Daily cron · weekly eligibility</small></article></div><article className="fp-panel"><header><div><span className="fp-kicker">DURABLE PROACTIVE INSIGHTS</span><h2>Monday financial check-in</h2></div><button className="fp-mini-button" disabled={busy} onClick={() => savePreference(!preference?.enabled)}>{preference?.enabled ? "Disable" : "Enable Monday 09:00"}</button></header><p className="fp-empty">{preference ? `${preference.local_time} · ${preference.timezone} · next ${new Date(preference.next_due_at).toLocaleString()}` : "Enable a weekly digest. Schedule state is stored in PostgreSQL and claimed by a signed, idempotent dispatcher."}</p></article><article className="fp-panel"><header><div><span className="fp-kicker">DELIVERY AUDIT</span><h2>In-app notifications</h2></div><small>No email or Telegram configured</small></header>{notifications.length ? <div className="fp-review-list">{notifications.map((item) => <article key={item.id}><header><span>{item.status}</span><small>{new Date(item.delivered_at ?? item.created_at).toLocaleString()}</small></header><b>{item.subject}</b><p>{item.body}</p><small>Job {item.digest_job_id.slice(0, 8)} · one delivery per schedule key</small></article>)}</div> : <p className="fp-empty">No digest has been delivered yet. The production cron trigger evaluates due preferences once per day.</p>}</article></div>;
-}
-
-function GovernanceView({ data, busy, createDemo, rejectReview }: { data: GovernanceData | null; busy: boolean; createDemo: () => Promise<void>; rejectReview: (id: string) => Promise<void> }) {
-  if (!data) return <div className="fp-empty-stage"><span>⌾</span><h2>Loading governance evidence</h2><p>FinPilot is resolving approved assets, risk controls and review lineage.</p></div>;
-  const pending = data.reviews.filter((item) => item.status === "pending");
-  return <div className="fp-content fp-governance"><div className="fp-summary-grid"><article><span>Asset registry</span><strong>{data.summary.artifacts}</strong><small>Versioned + hashed</small></article><article><span>Risk controls</span><strong>{data.summary.risks}</strong><small>Owned and review-dated</small></article><article><span>Human review</span><strong>{data.summary.pending_reviews}</strong><small>Pending cases</small></article><article><span>Release gate</span><strong className={data.summary.release_ready ? "positive" : "negative"}>{data.summary.release_ready ? "READY" : "BLOCKED"}</strong><small>{data.summary.evaluation_failures} incomplete gates</small></article></div><div className="fp-two-col"><article className="fp-panel"><header><div><span className="fp-kicker">LIVE EVALUATION GATES</span><h2>Promotion evidence</h2></div><small>{data.summary.baseline_version}</small></header><div className="fp-governance-list">{data.evaluations.map((item) => <div key={item.id}><span className={`fp-status-pill ${item.status}`}>{item.status}</span><p><b>{item.dataset_id}</b><small>{item.dataset_version} · code {item.code_version} · {item.duration_ms} ms</small>{item.failures.map((failure) => <em key={failure}>{failure}</em>)}</p></div>)}</div>{data.summary.release_blockers.length > 0 && <div className="fp-blockers"><b>Active blockers</b>{data.summary.release_blockers.map((item) => <span key={item}>{item}</span>)}</div>}</article><article className="fp-panel"><header><div><span className="fp-kicker">HUMAN OVERSIGHT</span><h2>Review queue</h2></div><button className="fp-mini-button" onClick={createDemo} disabled={busy}>Create synthetic case</button></header>{pending.length ? <div className="fp-review-list">{pending.map((item) => <article key={item.id}><header><span>{item.risk_level} · {item.source}</span><small>{new Date(item.created_at).toLocaleString()}</small></header><p>{item.reason}</p><small>{Object.keys(item.artifact_lineage).length} exact artifact versions retained</small>{item.requested_by_user_id === null && <button onClick={() => rejectReview(item.id)} disabled={busy}>Reject unsafe advice</button>}</article>)}</div> : <p className="fp-empty">No pending cases. Create the explicit synthetic demo to trace an automatic rejection through an auditable reviewer decision.</p>}</article></div><article className="fp-panel"><header><div><span className="fp-kicker">MODEL · PROMPT · POLICY REGISTRY</span><h2>Approved and proposed versions</h2></div><small>Secrets and full prompts excluded</small></header><div className="fp-artifact-grid">{data.artifacts.map((item) => <article key={item.id}><header><span>{item.artifact_type}</span><em className={`fp-status-pill ${item.status}`}>{item.status}</em></header><b>{item.name}</b><p>{item.version}</p><code>{item.content_sha256.slice(0, 16)}…</code><small>{item.approval_source}</small></article>)}</div></article><article className="fp-panel"><header><div><span className="fp-kicker">AI RISK REGISTER</span><h2>Residual risk and accountable owner</h2></div><small>{data.summary.drift_alerts.length} drift alerts</small></header><div className="fp-risk-table"><table><thead><tr><th>ID</th><th>Risk</th><th>Impact</th><th>Residual</th><th>Owner</th><th>Review</th></tr></thead><tbody>{data.risks.map((item) => <tr key={item.id}><td>{item.risk_id}</td><td><b>{item.category.replaceAll("_", " ")}</b><small>{item.mitigation}</small></td><td>{item.impact}</td><td><span className={`fp-status-pill ${item.residual_risk}`}>{item.residual_risk}</span></td><td>{item.owner_role}</td><td>{item.review_on}</td></tr>)}</tbody></table></div></article></div>;
-}
-
-function SystemMap({ agentRun, visibleEvents, setVisibleEvents }: { agentRun: AgentRun | null; visibleEvents: number; setVisibleEvents: (value: number | ((count: number) => number)) => void }) {
-  const activeNode = agentRun?.events[Math.max(visibleEvents - 1, 0)]?.node;
-  return <main className="fp-system"><section className="fp-system-intro"><p className="fp-kicker">INSPECTABLE BY DESIGN</p><h1>How FinPilot turns a statement into verified advice.</h1><p>Every green path below exists in the application. Mesh handles semantics; deterministic code owns money, authorization and release decisions.</p></section><section className="fp-graph"><div className="fp-flow-line" />{architecture.map((node, index) => <article key={node.id} className={(activeNode?.includes(node.id) || (node.id === "analyst" && activeNode === "behavior_analyst") || (node.id === "advisor" && ["financial_advisor", "revision"].includes(activeNode ?? "")) || (node.id === "verifier" && activeNode === "verification")) ? "active" : ""}><i>{index + 1}</i><span>{node.icon}</span><h3>{node.title}</h3><p>{node.detail}</p><small>{node.runtime}</small></article>)}</section><section className="fp-trace-player"><header><div><b>Trace player</b><span>{agentRun ? `${visibleEvents}/${agentRun.events.length} persisted events` : "Run the live workspace to record a trace"}</span></div><div><button onClick={() => setVisibleEvents((count) => Math.max(0, count - 1))} disabled={!agentRun || visibleEvents === 0}>‹ Prev</button><button className="active" onClick={() => setVisibleEvents((count) => agentRun ? Math.min(agentRun.events.length, count + 1) : 0)} disabled={!agentRun || visibleEvents >= agentRun.events.length}>Next ›</button><button onClick={() => setVisibleEvents(0)} disabled={!agentRun}>↻ Reset</button></div></header>{agentRun && visibleEvents > 0 && <div className="fp-trace-detail"><span>{agentRun.events[visibleEvents - 1].node}</span><strong>{agentRun.events[visibleEvents - 1].summary}</strong><small>{agentRun.events[visibleEvents - 1].model_id ? `Mesh · ${agentRun.events[visibleEvents - 1].model_id}` : "Deterministic control"}</small></div>}</section><section className="fp-stack"><article><span>LANGGRAPH</span><b>Typed conditional workflow</b><small>One bounded revision loop</small></article><article><span>FASTAPI</span><b>Authenticated API boundary</b><small>Tenant derived server-side</small></article><article><span>POSTGRESQL</span><b>Versioned financial truth</b><small>Immutable evidence lineage</small></article><article><span>MESH API</span><b>Only model gateway</b><small>Model, tokens and latency logged</small></article><article><span>NEXT.JS</span><b>Operational console</b><small>No fabricated live values</small></article></section><section className="fp-judge-grid"><header><p className="fp-kicker">CONTROL SURFACE</p><h2>What the implementation proves</h2></header>{["Real CSV truth and idempotency", "Exact recurrence and anomaly evidence", "Chronological forecast backtesting", "Immutable what-if branches", "Distinct Mesh-powered specialists", "Critic and bounded correction loop", "Independent financial verification", "Tenant-scoped audit and lineage", "Durable idempotent digest delivery"].map((item, index) => <article key={item}><i>{String(index + 1).padStart(2, "0")}</i><span>✓</span><b>{item}</b></article>)}</section></main>;
+      {inspectorOpen && <Inspector run={agentRun} visibleEvents={visibleEvents} running={busy === "advisor" || busy === "analysis"} onClose={() => setInspectorOpen(false)} />}
+      {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
+      <ToastStack toasts={toasts} dismiss={dismiss} />
+    </div>
+  );
 }

@@ -1,0 +1,78 @@
+export type View = "overview" | "ledger" | "forecast" | "advice" | "audit" | "digests" | "governance" | "system";
+
+export type Tenant = { id: string; name: string; role: string };
+export type Account = { id: string; name: string; currency: string };
+export type Transaction = {
+  id: string; transaction_date: string; amount_minor: number; balance_minor: number | null;
+  currency: string; merchant_normalized: string; description: string; kind: string;
+  category: string; classification_method: string; classification_confidence_bps: number;
+  is_excluded_from_cashflow: boolean;
+};
+export type UploadResult = {
+  id: string; filename: string; status: string; total_rows: number; accepted_rows: number;
+  rejected_rows: number; duplicate_rows: number; replayed: boolean;
+  row_errors: Array<Record<string, string | number>>;
+};
+export type Pattern = {
+  id: string; merchant: string; cadence: string; typical_amount_minor: number;
+  confidence_bps: number; explanation?: string;
+};
+export type Anomaly = { transaction_id: string; severity: string; explanation: string };
+export type Snapshot = {
+  id: string; as_of: string; currency: string; opening_balance_minor: number;
+  source_transaction_count: number; recurring_patterns: Pattern[]; anomaly_results: Anomaly[];
+};
+export type Point = { day: string; balance_minor: number; recurring_flow_minor: number; estimated_variable_spend_minor: number };
+export type Forecast = { id: string; horizon_days: number; opening_balance_minor: number; minimum_balance_minor: number; assumptions: string[]; points: Point[] };
+export type Scenario = { id: string; name: string; minimum_balance_minor: number; first_shortfall_date: string | null; ending_delta_minor: number; points: Point[] };
+export type AgentEvent = {
+  id: string; sequence: number; node: string; event_type: string; summary: string;
+  details: Record<string, unknown>; model_id: string | null; latency_ms: number | null;
+  input_tokens: number | null; output_tokens: number | null;
+};
+export type Recommendation = {
+  id: string; rank: number; title: string; explanation: string; amount_minor: number | null;
+  currency: string; evidence_ids: string[]; assumptions: string[]; confidence_bps: number;
+  verification_status: string;
+};
+export type AgentRun = {
+  id: string; status: string; verification_status: string; final_response: string; model_id: string;
+  revision_attempts: number; total_latency_ms: number; total_input_tokens: number;
+  total_output_tokens: number; events: AgentEvent[]; recommendations: Recommendation[];
+};
+export type GovernanceSummary = {
+  artifacts: number; risks: number; pending_reviews: number; evaluation_failures: number;
+  rejected_recommendations: number; release_ready: boolean; release_blockers: string[];
+  drift_alerts: string[]; baseline_version: string;
+};
+export type GovernanceArtifact = {
+  id: string; artifact_type: string; name: string; version: string; content_sha256: string;
+  status: string; approval_source: string; approval_reason: string | null; created_at: string;
+};
+export type GovernanceRisk = {
+  id: string; risk_id: string; category: string; likelihood: string; impact: string;
+  residual_risk: string; mitigation: string; owner_role: string; review_on: string;
+  acceptance_status: string;
+};
+export type EvaluationRun = {
+  id: string; dataset_id: string; dataset_version: string; status: string;
+  metrics: Record<string, number | string>; thresholds: Record<string, number | string>;
+  model_id: string | null; failures: string[]; duration_ms: number; code_version: string;
+};
+export type HumanReview = {
+  id: string; source: string; reason: string; risk_level: string; status: string;
+  evidence_ids: string[]; artifact_lineage: Record<string, string>;
+  requested_by_user_id: string | null; created_at: string;
+};
+export type GovernanceData = {
+  summary: GovernanceSummary; artifacts: GovernanceArtifact[]; risks: GovernanceRisk[];
+  evaluations: EvaluationRun[]; reviews: HumanReview[];
+};
+export type DigestPreference = {
+  id: string; enabled: boolean; weekday: number; local_time: string; timezone: string;
+  next_due_at: string; last_dispatched_at: string | null;
+};
+export type Notification = {
+  id: string; digest_job_id: string; status: string; subject: string; body: string;
+  delivered_at: string | null; created_at: string;
+};
