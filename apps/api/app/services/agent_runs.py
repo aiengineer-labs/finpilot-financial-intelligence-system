@@ -15,6 +15,7 @@ from app.database.models import (
     CalculationSnapshot,
     FinancialVerification,
     Recommendation,
+    RiskLevel,
     ScenarioRun,
     StoredForecast,
     StoredForecastPoint,
@@ -29,6 +30,11 @@ from app.graphs.advice import (
 from app.guardrails.service import GuardrailViolation, get_model_guardrails
 from app.integrations.mesh import MeshClient
 from app.security.input_policy import InputDecision, assess_untrusted_text
+from app.services.governance import (
+    approved_artifact_lineage,
+    create_review_case,
+    ensure_governance_baseline,
+)
 
 
 async def _context(
@@ -156,6 +162,10 @@ async def execute_advice(
         session, tenant_id=tenant_id, forecast_id=forecast_id, scenario_id=scenario_id
     )
     settings = get_settings()
+    await ensure_governance_baseline(
+        session, tenant_id=tenant_id, owner_user_id=user_id, settings=settings
+    )
+    artifact_lineage = await approved_artifact_lineage(session, tenant_id)
     guardrails = get_model_guardrails()
     try:
         prepared = await guardrails.prepare_input(question, context)
@@ -179,14 +189,13 @@ async def execute_advice(
         total_latency_ms=0,
         total_input_tokens=0,
         total_output_tokens=0,
+        artifact_lineage=artifact_lineage,
     )
     session.add(execution)
     await session.commit()
     await session.refresh(execution)
     try:
-        state = await AdviceWorkflow(
-            mesh or MeshClient(settings, output_guard=guardrails)
-        ).run(
+        state = await AdviceWorkflow(mesh or MeshClient(settings, output_guard=guardrails)).run(
             question=prepared.question,
             context=prepared.context,
             guardrail_events=prepared.events,
@@ -253,6 +262,7 @@ async def execute_advice(
             assumptions=item.assumptions,
             confidence_bps=item.confidence_bps,
             verification_status=status,
+            artifact_lineage=artifact_lineage,
         )
         session.add(recommendation)
         await session.flush()
@@ -270,6 +280,18 @@ async def execute_advice(
                 },
                 verifier_version=VERIFIER_VERSION,
             )
+        )
+    if status is not VerificationStatus.ACCEPT:
+        await create_review_case(
+            session,
+            tenant_id=tenant_id,
+            requested_by_user_id=user_id,
+            source="automatic_verifier_escalation",
+            reason="Deterministic financial verification did not accept the final recommendation.",
+            risk_level=RiskLevel.HIGH,
+            evidence_ids=[str(snapshot.id), str(forecast.id)],
+            artifact_lineage=artifact_lineage,
+            execution_id=execution.id,
         )
     await session.commit()
     await session.refresh(execution)

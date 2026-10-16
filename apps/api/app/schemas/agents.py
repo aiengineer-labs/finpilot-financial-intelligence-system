@@ -41,6 +41,7 @@ class RecommendationResponse(BaseModel):
     assumptions: list[str]
     confidence_bps: int
     verification_status: VerificationStatus
+    artifact_lineage: dict[str, str]
 
 
 class AgentRunResponse(BaseModel):
@@ -62,6 +63,7 @@ class AgentRunResponse(BaseModel):
     total_latency_ms: int
     total_input_tokens: int
     total_output_tokens: int
+    artifact_lineage: dict[str, str]
     events: list[AgentEventResponse]
     recommendations: list[RecommendationResponse]
     created_at: datetime

@@ -6,10 +6,7 @@ import pytest
 from app.security.input_policy import InputDecision, assess_untrusted_text
 
 DATASET = (
-    Path(__file__).resolve().parents[4]
-    / "evaluation"
-    / "security"
-    / "prompt_injection_cases.csv"
+    Path(__file__).resolve().parents[4] / "evaluation" / "security" / "prompt_injection_cases.csv"
 )
 
 

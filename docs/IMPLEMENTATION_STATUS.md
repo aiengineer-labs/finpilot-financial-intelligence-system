@@ -18,7 +18,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 - **Phase 4 — IMPLEMENTED / LIVE VERIFICATION PENDING:** real typed LangGraph workflow, separate behavior analyst/advisor/critic agents through the Mesh-only adapter, bounded correction routing, independent deterministic financial verifier, fail-closed release, persisted execution events/recommendations/verifications, tenant-safe APIs, and PostgreSQL audit lineage. Static, unit, integration, and database gates pass; the final live inference smoke is pending explicit approval to transmit synthetic forecast context to Mesh.
 - **Phase 5 — IN_PROGRESS:** the main route is now a production-style responsive operations console with authentication, account creation, CSV upload, live ledger metrics, snapshot/forecast/scenario execution, advice, audit views, persisted event replay, and a browser-visible “How it works” system map. Signed-out, authenticated, and architecture modes were visually verified in Chrome; full browser automation of an external-inference run remains pending the same Mesh egress approval.
 - **Phase 6 — IMPLEMENTED / LIVE RED-TEAM PENDING:** deterministic prompt-injection normalization covers Unicode/full-width confusables, zero-width controls, HTML entities, double URL encoding, and Base64 payloads. NeMo Guardrails 0.24.1 input/output rails and Presidio pattern-based minimization are wired into the live agent path; guardrail/privacy events are persisted and NeMo performs no direct inference. Promptfoo 0.124.1 schema validation passes for an offline PR lane and a Mesh-only model-based lane. The offline lane measures 168 attack variants and 16 legitimate controls: 0/168 missed attacks and 0/16 false positives. Bandit, Gitleaks, pip-audit, and application-layer container high/critical gates pass. The full image retains one unresolved upstream Trixie zlib high CVE. The authorized model-based red team is not run because Mesh egress approval is pending. These are bounded results, not an immunity claim.
-- **Phase 6b — NOT_STARTED:** governance versions, lineage, approvals, risk controls, and UI.
+- **Phase 6b — IMPLEMENTED:** PostgreSQL-backed version/hash registry, exact execution and recommendation lineage, 13-risk register, evaluation promotion gates, independent human-review decisions, tenant-scoped APIs, synthetic rejected-advice demonstration, and the live governance dashboard are implemented. Runtime uses approved artifacts only; draft policy changes cannot silently take effect. Dedicated incident records and durable drift observations remain explicit follow-on work.
 - **Phase 7 — NOT_STARTED:** durable digest scheduling and performance profiling.
 - **Phase 8 — NOT_STARTED:** reproducibility, documentation, evaluation, Vercel readiness/deployment evidence, official workflow.
 
@@ -72,6 +72,10 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 | 2026-10-16 | Promptfoo 0.124.1 config validation | PASS: pinned official container validates the offline and model-based configurations; target is the production policy function, model attacker and grader are both pinned to `https://api.meshapi.ai/v1`, and remote-only plugins/strategies are absent |
 | 2026-10-16 | Promptfoo offline security regression | PASS: 184/184 cases, 0 failures, 0 errors, 2,125 ms, 0 model calls/tokens; bounded ASR 0/168 and benign false-positive rate 0/16. Machine-readable report committed under `evaluation/reports/` |
 | 2026-10-16 | backend gates after Promptfoo integration | PASS: Ruff; strict mypy over 46 modules; 215 pytest tests; 82% line coverage |
+| 2026-10-16 | Phase 6b governance backend gates | PASS: Ruff; strict mypy over 49 modules; 217 pytest tests; 82% line coverage; recommendation review ownership and lineage now tenant-validated |
+| 2026-10-16 | Phase 6b frontend gates | PASS: ESLint with zero warnings, strict TypeScript, and Next production build |
+| 2026-10-16 | PostgreSQL governance migration | PASS: Alembic head `20261016_0005`; five governance tables verified; API and web healthy |
+| 2026-10-16 | Chrome governance-console smoke | PASS: running Docker UI visibly rendered 10 versioned assets, 13 risks, blocked release gate, evaluation evidence, and review queue |
 
 ## External blockers
 
@@ -82,4 +86,4 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 
 ## Next executable step
 
-Implement the Phase 6b functioning governance slice: versioned assets and risk controls, immutable decision lineage, human-review cases/decisions, authorization and promotion gates, tenant-scoped governance APIs, and the read-only governance console. After explicit Mesh egress approval, run and record the live specialist workflow and Promptfoo model-based red team. The unresolved base-image CVE and Vercel bundle/runtime measurement remain release-readiness work.
+Implement Phase 7 durable weekly digests and alerts with concurrency-safe, idempotent dispatch plus delivery audit and performance profiling. After explicit Mesh egress approval, run and record the live specialist workflow and Promptfoo model-based red team. The unresolved base-image CVE and Vercel bundle/runtime measurement remain release-readiness work.

@@ -113,25 +113,43 @@ def test_purchase_scenario_reports_shortfall_without_mutating_baseline() -> None
 def test_chronological_backtest_uses_only_pre_cutoff_history() -> None:
     transactions = [
         _transaction(
-            "salary-jul", date(2026, 7, 1), 100_000, "acme", "income",
-            TransactionKind.INCOME, balance=100_000,
+            "salary-jul",
+            date(2026, 7, 1),
+            100_000,
+            "acme",
+            "income",
+            TransactionKind.INCOME,
+            balance=100_000,
         ),
         _transaction(
-            "salary-aug", date(2026, 8, 1), 100_000, "acme", "income",
-            TransactionKind.INCOME, balance=200_000,
+            "salary-aug",
+            date(2026, 8, 1),
+            100_000,
+            "acme",
+            "income",
+            TransactionKind.INCOME,
+            balance=200_000,
         ),
         _transaction(
-            "salary-sep", date(2026, 9, 1), 100_000, "acme", "income",
-            TransactionKind.INCOME, balance=300_000,
+            "salary-sep",
+            date(2026, 9, 1),
+            100_000,
+            "acme",
+            "income",
+            TransactionKind.INCOME,
+            balance=300_000,
         ),
         _transaction(
-            "salary-oct", date(2026, 10, 1), 100_000, "acme", "income",
-            TransactionKind.INCOME, balance=400_000,
+            "salary-oct",
+            date(2026, 10, 1),
+            100_000,
+            "acme",
+            "income",
+            TransactionKind.INCOME,
+            balance=400_000,
         ),
     ]
-    result = chronological_backtest(
-        transactions, cutoffs=[date(2026, 9, 1)], horizon_days=30
-    )
+    result = chronological_backtest(transactions, cutoffs=[date(2026, 9, 1)], horizon_days=30)
     assert result.folds[0].observations == 1
     assert result.forecast_mae_minor == 0
     assert result.naive_mae_minor == 100_000

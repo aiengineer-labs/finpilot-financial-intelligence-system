@@ -21,6 +21,7 @@ from app.schemas.auth import (
     TokenResponse,
     UserResponse,
 )
+from app.services.governance import ensure_governance_baseline
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -41,6 +42,9 @@ async def register(
     session.add_all([user, tenant])
     await session.flush()
     session.add(Membership(user_id=user.id, tenant_id=tenant.id, role=TenantRole.OWNER))
+    await ensure_governance_baseline(
+        session, tenant_id=tenant.id, owner_user_id=user.id, settings=settings
+    )
     try:
         await session.commit()
     except IntegrityError as exc:

@@ -33,9 +33,7 @@ class ModelGuardrails:
         self._rails = LLMRails(RailsConfig.from_path(str(config_path)))
         self._pii = PiiMinimizer()
 
-    async def prepare_input(
-        self, question: str, context: dict[str, Any]
-    ) -> PreparedModelInput:
+    async def prepare_input(self, question: str, context: dict[str, Any]) -> PreparedModelInput:
         result = await self._rails.check_async([{"role": "user", "content": question}])
         if result.status is RailStatus.BLOCKED:
             raise GuardrailViolation(f"input blocked by NeMo rail: {result.rail or 'unknown'}")

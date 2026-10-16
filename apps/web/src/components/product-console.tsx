@@ -10,7 +10,7 @@ const DEFAULT_MAPPING = JSON.stringify({
 });
 
 type Mode = "live" | "system";
-type View = "overview" | "ledger" | "forecast" | "advice" | "audit";
+type View = "overview" | "ledger" | "forecast" | "advice" | "audit" | "governance";
 type Tenant = { id: string; name: string; role: string };
 type Account = { id: string; name: string; currency: string };
 type Transaction = {
@@ -27,6 +27,12 @@ type Scenario = { id: string; name: string; minimum_balance_minor: number; first
 type AgentEvent = { id: string; sequence: number; node: string; event_type: string; summary: string; details: Record<string, unknown>; model_id: string | null; latency_ms: number | null; input_tokens: number | null; output_tokens: number | null };
 type Recommendation = { id: string; rank: number; title: string; explanation: string; amount_minor: number | null; currency: string; evidence_ids: string[]; assumptions: string[]; confidence_bps: number; verification_status: string };
 type AgentRun = { id: string; status: string; verification_status: string; final_response: string; model_id: string; revision_attempts: number; total_latency_ms: number; total_input_tokens: number; total_output_tokens: number; events: AgentEvent[]; recommendations: Recommendation[] };
+type GovernanceSummary = { artifacts: number; risks: number; pending_reviews: number; evaluation_failures: number; rejected_recommendations: number; release_ready: boolean; release_blockers: string[]; drift_alerts: string[]; baseline_version: string };
+type GovernanceArtifact = { id: string; artifact_type: string; name: string; version: string; content_sha256: string; status: string; approval_source: string; approval_reason: string | null; created_at: string };
+type GovernanceRisk = { id: string; risk_id: string; category: string; likelihood: string; impact: string; residual_risk: string; mitigation: string; owner_role: string; review_on: string; acceptance_status: string };
+type EvaluationRun = { id: string; dataset_id: string; dataset_version: string; status: string; metrics: Record<string, number | string>; thresholds: Record<string, number | string>; model_id: string | null; failures: string[]; duration_ms: number; code_version: string };
+type HumanReview = { id: string; source: string; reason: string; risk_level: string; status: string; evidence_ids: string[]; artifact_lineage: Record<string, string>; requested_by_user_id: string | null; created_at: string };
+type GovernanceData = { summary: GovernanceSummary; artifacts: GovernanceArtifact[]; risks: GovernanceRisk[]; evaluations: EvaluationRun[]; reviews: HumanReview[] };
 
 const stages = [
   ["import", "Import"], ["categorize", "Categorize"], ["analyze", "Analyze"],
@@ -77,6 +83,7 @@ export function ProductConsole() {
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [agentRun, setAgentRun] = useState<AgentRun | null>(null);
+  const [governance, setGovernance] = useState<GovernanceData | null>(null);
   const [visibleEvents, setVisibleEvents] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -112,6 +119,25 @@ export function ProductConsole() {
     setAccounts(nextAccounts); setTransactions(page.items);
     const known = page.items.find((item) => item.balance_minor !== null);
     if (known) setAsOf(known.transaction_date);
+    await loadGovernance(activeToken, activeTenant.id);
+  }
+
+  async function loadGovernance(activeToken = token, activeTenant = tenant?.id) {
+    if (!activeToken || !activeTenant) return;
+    const [summaryResponse, artifactResponse, riskResponse, evaluationResponse, reviewResponse] = await Promise.all([
+      api("/api/v1/governance/summary", {}, activeToken, activeTenant),
+      api("/api/v1/governance/artifacts", {}, activeToken, activeTenant),
+      api("/api/v1/governance/risks", {}, activeToken, activeTenant),
+      api("/api/v1/governance/evaluations", {}, activeToken, activeTenant),
+      api("/api/v1/governance/reviews", {}, activeToken, activeTenant)
+    ]);
+    setGovernance({
+      summary: (await summaryResponse.json()) as GovernanceSummary,
+      artifacts: (await artifactResponse.json()) as GovernanceArtifact[],
+      risks: (await riskResponse.json()) as GovernanceRisk[],
+      evaluations: (await evaluationResponse.json()) as EvaluationRun[],
+      reviews: (await reviewResponse.json()) as HumanReview[]
+    });
   }
 
   async function authenticate(event: FormEvent<HTMLFormElement>) {
@@ -173,8 +199,27 @@ export function ProductConsole() {
       const runResponse = await api("/api/v1/agent-runs", { method: "POST", body: JSON.stringify({ forecast_id: nextForecast.id, scenario_id: nextScenario?.id ?? null, question }) });
       const nextRun = (await runResponse.json()) as AgentRun;
       setSnapshot(nextSnapshot); setForecast(nextForecast); setScenario(nextScenario); setAgentRun(nextRun);
+      await loadGovernance();
       setVisibleEvents(1); setView("advice");
     } catch (caught) { setError(caught instanceof Error ? caught.message : "FinPilot run failed safely"); }
+    finally { setBusy(false); }
+  }
+
+  async function createGovernanceDemo() {
+    setBusy(true); setError("");
+    try {
+      await api("/api/v1/governance/demo-review", { method: "POST", body: "{}" });
+      await loadGovernance(); setView("governance");
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not create governance demo"); }
+    finally { setBusy(false); }
+  }
+
+  async function rejectReview(reviewId: string) {
+    setBusy(true); setError("");
+    try {
+      await api(`/api/v1/governance/reviews/${reviewId}/decisions`, { method: "POST", body: JSON.stringify({ outcome: "reject", reason: "Unsafe guarantee remains forbidden; deterministic controls cannot be overridden." }) });
+      await loadGovernance();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not record governance decision"); }
     finally { setBusy(false); }
   }
 
@@ -207,12 +252,13 @@ export function ProductConsole() {
     {mode === "system" ? <SystemMap agentRun={agentRun} visibleEvents={visibleEvents} setVisibleEvents={setVisibleEvents} /> : !token || !tenant ? <main className="fp-auth-layout"><section><p className="fp-kicker">NEURO-SYMBOLIC FINANCIAL DECISION INTELLIGENCE</p><h1>See the math.<br />Watch the agents.<br /><span>Trust the evidence.</span></h1><p>Import a real statement, branch a what-if scenario, and inspect every deterministic calculation and Mesh-powered handoff.</p><div className="fp-trust-row"><span>Exact money math</span><span>Tenant isolation</span><span>Fail-closed advice</span></div></section><form className="fp-auth-panel" onSubmit={authenticate}><div className="fp-auth-toggle"><button type="button" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Sign in</button><button type="button" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Register</button></div><h2>{authMode === "login" ? "Continue to your household" : "Create a private household"}</h2>{authMode === "register" && <label>Household name<input name="household" required /></label>}<label>Email<input name="email" type="email" required /></label><label>Password<input name="password" type="password" minLength={12} required /></label><button className="fp-primary" disabled={busy}>{busy ? "Authenticating…" : authMode === "login" ? "Open workspace" : "Create household"}</button>{error && <p className="fp-error">{error}</p>}<small>Short-lived access tokens stay in memory. Financial data is never sent to the browser without tenant authorization.</small></form></main> : <main className="fp-workspace">
       <aside className="fp-sidebar"><div className="fp-household"><div><span>{tenant.name.slice(0, 2).toUpperCase()}</span><div><b>{tenant.name}</b><small>{tenant.role} · private workspace</small></div></div><p>{transactions.length ? `${transactions.length} verified ledger rows` : "Ready for your first statement"}</p></div><div className="fp-ring-card"><div className="fp-ring" style={{ "--rate": `${metrics.rate * 3.6}deg` } as CSSProperties}><b>{metrics.rate}%</b></div><dl><div><dt>Income</dt><dd>{money(metrics.income)}</dd></div><div><dt>Spend</dt><dd>{money(metrics.spend)}</dd></div><div><dt>Net</dt><dd className={metrics.savings >= 0 ? "positive" : "negative"}>{money(metrics.savings)}</dd></div></dl></div>{!accounts.length ? <button className="fp-upload" onClick={createAccount} disabled={busy}><span>＋</span><b>Create primary account</b><small>No balance will be invented</small></button> : <label className="fp-upload"><span>⇧</span><b>{uploadFileName || "Upload transactions"}</b><small>{uploadSummary || "CSV · explicit bank mapping"}</small><input ref={fileRef} type="file" accept=".csv,text/csv" onChange={uploadStatement} /></label>}<button className="fp-run" onClick={runFinPilot} disabled={busy || !transactions.length}>{busy ? "Running secure pipeline…" : "▷ Run FinPilot"}</button><div className="fp-controls"><label>Balance date<input type="date" value={asOf} onChange={(event) => setAsOf(event.target.value)} /></label><label>Horizon<select value={horizon} onChange={(event) => setHorizon(Number(event.target.value))}><option value={30}>30 days</option><option value={60}>60 days</option><option value={90}>90 days</option></select></label><label>Purchase date<input type="date" value={scenarioDate} onChange={(event) => setScenarioDate(event.target.value)} /></label><label>Purchase amount (₹)<input value={scenarioAmount} onChange={(event) => setScenarioAmount(event.target.value)} inputMode="decimal" /></label></div><div className="fp-stage-list">{stages.map(([id, label]) => <div key={id} className={completed.has(id) ? "done" : ""}><span>{completed.has(id) ? "✓" : "○"}</span>{label}</div>)}</div></aside>
 
-      <section className="fp-main"><nav className="fp-tabs">{(["overview", "ledger", "forecast", "advice", "audit"] as View[]).map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}</nav><div className="fp-pipeline">{stages.slice(1).map(([id, label], index) => <div key={id} className={completed.has(id) ? "done" : ""}><i>{index + 1}</i><span>{label}</span>{index < stages.length - 2 && <b>›</b>}</div>)}</div>{error && <p className="fp-error fp-wide-error">{error}</p>}
+      <section className="fp-main"><nav className="fp-tabs">{(["overview", "ledger", "forecast", "advice", "audit", "governance"] as View[]).map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}</nav><div className="fp-pipeline">{stages.slice(1).map(([id, label], index) => <div key={id} className={completed.has(id) ? "done" : ""}><i>{index + 1}</i><span>{label}</span>{index < stages.length - 2 && <b>›</b>}</div>)}</div>{error && <p className="fp-error fp-wide-error">{error}</p>}
         {view === "overview" && <Overview metrics={metrics} snapshot={snapshot} transactions={transactions} />}
         {view === "ledger" && <Ledger transactions={transactions} />}
         {view === "forecast" && <ForecastView snapshot={snapshot} forecast={forecast} scenario={scenario} />}
         {view === "advice" && <AdviceView run={agentRun} question={question} setQuestion={setQuestion} visibleEvents={visibleEvents} />}
         {view === "audit" && <AuditView run={agentRun} />}
+        {view === "governance" && <GovernanceView data={governance} busy={busy} createDemo={createGovernanceDemo} rejectReview={rejectReview} />}
       </section>
 
       <aside className="fp-agent-log"><header><span>›_</span><b>Agent log</b><em>{busy ? "running" : agentRun ? "persisted" : "idle"}</em></header><div>{!agentRun ? <p>{"// waiting for a verified run"}<br />{"// configure the inputs and press Run FinPilot"}</p> : agentRun.events.slice(0, visibleEvents).map((event) => <article key={event.id}><time>[{String(event.sequence).padStart(2, "0")}]</time><b>{event.node}</b><p>{event.summary}</p>{event.model_id && <span>Mesh API · {event.model_id} · {event.output_tokens ?? 0} tok · {event.latency_ms ?? 0} ms</span>}</article>)}</div>{agentRun && <footer>LLM tokens {agentRun.total_input_tokens + agentRun.total_output_tokens} · {agentRun.total_latency_ms} ms</footer>}</aside>
@@ -241,6 +287,12 @@ function AdviceView({ run, question, setQuestion, visibleEvents }: { run: AgentR
 function AuditView({ run }: { run: AgentRun | null }) {
   if (!run) return <div className="fp-empty-stage"><span>≡</span><h2>No audit timeline yet</h2><p>Every completed and rejected node will appear here.</p></div>;
   return <div className="fp-panel fp-timeline"><header><div><span className="fp-kicker">IMMUTABLE DECISION TRAIL</span><h2>Execution {run.id.slice(0, 8)}</h2></div><small>{run.verification_status}</small></header>{run.events.map((event) => <article key={event.id}><i>{event.sequence}</i><div><span>{event.event_type}</span><h3>{event.node}</h3><p>{event.summary}</p></div><aside>{event.model_id ? <><b>{event.model_id}</b><small>{event.input_tokens ?? 0} in · {event.output_tokens ?? 0} out</small><small>{event.latency_ms ?? 0} ms</small></> : <><b>Deterministic</b><small>No model call</small></>}</aside></article>)}</div>;
+}
+
+function GovernanceView({ data, busy, createDemo, rejectReview }: { data: GovernanceData | null; busy: boolean; createDemo: () => Promise<void>; rejectReview: (id: string) => Promise<void> }) {
+  if (!data) return <div className="fp-empty-stage"><span>⌾</span><h2>Loading governance evidence</h2><p>FinPilot is resolving approved assets, risk controls and review lineage.</p></div>;
+  const pending = data.reviews.filter((item) => item.status === "pending");
+  return <div className="fp-content fp-governance"><div className="fp-summary-grid"><article><span>Asset registry</span><strong>{data.summary.artifacts}</strong><small>Versioned + hashed</small></article><article><span>Risk controls</span><strong>{data.summary.risks}</strong><small>Owned and review-dated</small></article><article><span>Human review</span><strong>{data.summary.pending_reviews}</strong><small>Pending cases</small></article><article><span>Release gate</span><strong className={data.summary.release_ready ? "positive" : "negative"}>{data.summary.release_ready ? "READY" : "BLOCKED"}</strong><small>{data.summary.evaluation_failures} incomplete gates</small></article></div><div className="fp-two-col"><article className="fp-panel"><header><div><span className="fp-kicker">LIVE EVALUATION GATES</span><h2>Promotion evidence</h2></div><small>{data.summary.baseline_version}</small></header><div className="fp-governance-list">{data.evaluations.map((item) => <div key={item.id}><span className={`fp-status-pill ${item.status}`}>{item.status}</span><p><b>{item.dataset_id}</b><small>{item.dataset_version} · code {item.code_version} · {item.duration_ms} ms</small>{item.failures.map((failure) => <em key={failure}>{failure}</em>)}</p></div>)}</div>{data.summary.release_blockers.length > 0 && <div className="fp-blockers"><b>Active blockers</b>{data.summary.release_blockers.map((item) => <span key={item}>{item}</span>)}</div>}</article><article className="fp-panel"><header><div><span className="fp-kicker">HUMAN OVERSIGHT</span><h2>Review queue</h2></div><button className="fp-mini-button" onClick={createDemo} disabled={busy}>Create synthetic case</button></header>{pending.length ? <div className="fp-review-list">{pending.map((item) => <article key={item.id}><header><span>{item.risk_level} · {item.source}</span><small>{new Date(item.created_at).toLocaleString()}</small></header><p>{item.reason}</p><small>{Object.keys(item.artifact_lineage).length} exact artifact versions retained</small>{item.requested_by_user_id === null && <button onClick={() => rejectReview(item.id)} disabled={busy}>Reject unsafe advice</button>}</article>)}</div> : <p className="fp-empty">No pending cases. Create the explicit synthetic demo to trace an automatic rejection through an auditable reviewer decision.</p>}</article></div><article className="fp-panel"><header><div><span className="fp-kicker">MODEL · PROMPT · POLICY REGISTRY</span><h2>Approved and proposed versions</h2></div><small>Secrets and full prompts excluded</small></header><div className="fp-artifact-grid">{data.artifacts.map((item) => <article key={item.id}><header><span>{item.artifact_type}</span><em className={`fp-status-pill ${item.status}`}>{item.status}</em></header><b>{item.name}</b><p>{item.version}</p><code>{item.content_sha256.slice(0, 16)}…</code><small>{item.approval_source}</small></article>)}</div></article><article className="fp-panel"><header><div><span className="fp-kicker">AI RISK REGISTER</span><h2>Residual risk and accountable owner</h2></div><small>{data.summary.drift_alerts.length} drift alerts</small></header><div className="fp-risk-table"><table><thead><tr><th>ID</th><th>Risk</th><th>Impact</th><th>Residual</th><th>Owner</th><th>Review</th></tr></thead><tbody>{data.risks.map((item) => <tr key={item.id}><td>{item.risk_id}</td><td><b>{item.category.replaceAll("_", " ")}</b><small>{item.mitigation}</small></td><td>{item.impact}</td><td><span className={`fp-status-pill ${item.residual_risk}`}>{item.residual_risk}</span></td><td>{item.owner_role}</td><td>{item.review_on}</td></tr>)}</tbody></table></div></article></div>;
 }
 
 function SystemMap({ agentRun, visibleEvents, setVisibleEvents }: { agentRun: AgentRun | null; visibleEvents: number; setVisibleEvents: (value: number | ((count: number) => number)) => void }) {

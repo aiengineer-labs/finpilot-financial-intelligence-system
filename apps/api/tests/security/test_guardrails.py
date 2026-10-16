@@ -35,9 +35,7 @@ def test_presidio_minimizes_domain_pii_without_changing_amounts() -> None:
     result = PiiMinimizer().minimize(
         "Email aarav@example.com, PAN ABCDE1234F, aadhaar 1234 5678 9012; amount 75000"
     )
-    assert result.text == (
-        "Email <EMAIL_ADDRESS>, PAN <IN_PAN>, <IN_AADHAAR>; amount 75000"
-    )
+    assert result.text == ("Email <EMAIL_ADDRESS>, PAN <IN_PAN>, <IN_AADHAAR>; amount 75000")
     assert result.detection_count == 3
     assert "75000" in result.text
 

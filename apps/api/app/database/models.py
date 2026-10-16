@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from uuid import UUID
 
@@ -7,6 +7,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Date,
+    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -58,6 +59,38 @@ class VerificationStatus(StrEnum):
     REVISE = "revise"
     REJECT = "reject"
     INSUFFICIENT_DATA = "insufficient_data"
+
+
+class GovernanceArtifactStatus(StrEnum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    SUPERSEDED = "superseded"
+
+
+class RiskLevel(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class HumanReviewStatus(StrEnum):
+    PENDING = "pending"
+    RESOLVED = "resolved"
+
+
+class HumanDecisionOutcome(StrEnum):
+    APPROVE = "approve"
+    REJECT = "reject"
+    REQUEST_INFORMATION = "request_information"
+    REQUEST_REVISION = "request_revision"
+
+
+class EvaluationGateStatus(StrEnum):
+    PASS = "pass"  # noqa: S105 - evaluation status, not a credential
+    FAIL = "fail"
+    NOT_RUN = "not_run"
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -310,6 +343,7 @@ class AgentExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     total_latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    artifact_lineage: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
 
 
 class AgentEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -351,6 +385,7 @@ class Recommendation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     assumptions: Mapped[list[str]] = mapped_column(JSON)
     confidence_bps: Mapped[int] = mapped_column(Integer)
     verification_status: Mapped[VerificationStatus] = mapped_column(Enum(VerificationStatus))
+    artifact_lineage: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
 
 
 class FinancialVerification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -368,3 +403,113 @@ class FinancialVerification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     reasons: Mapped[list[str]] = mapped_column(JSON)
     checked_values: Mapped[dict[str, str | int | list[str]]] = mapped_column(JSON)
     verifier_version: Mapped[str] = mapped_column(String(40))
+
+
+class GovernanceArtifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "governance_artifacts"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "artifact_type", "name", "version"),
+        Index("ix_governance_artifacts_tenant_status", "tenant_id", "status"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    artifact_type: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(120))
+    version: Mapped[str] = mapped_column(String(80))
+    content_sha256: Mapped[str] = mapped_column(String(64))
+    configuration: Mapped[dict[str, str | int | bool | list[str]]] = mapped_column(JSON)
+    status: Mapped[GovernanceArtifactStatus] = mapped_column(Enum(GovernanceArtifactStatus))
+    owner_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    approved_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+    approval_source: Mapped[str] = mapped_column(String(80), default="pending")
+    approval_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rollback_artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("governance_artifacts.id", ondelete="RESTRICT"), nullable=True
+    )
+
+
+class RiskRegisterEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "risk_register_entries"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "risk_id", "version"),
+        Index("ix_risk_register_tenant_level", "tenant_id", "residual_risk"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    risk_id: Mapped[str] = mapped_column(String(40))
+    version: Mapped[str] = mapped_column(String(40))
+    category: Mapped[str] = mapped_column(String(80))
+    likelihood: Mapped[RiskLevel] = mapped_column(Enum(RiskLevel))
+    impact: Mapped[RiskLevel] = mapped_column(Enum(RiskLevel))
+    affected_assets: Mapped[list[str]] = mapped_column(JSON)
+    cause: Mapped[str] = mapped_column(Text)
+    mitigation: Mapped[str] = mapped_column(Text)
+    test_evidence: Mapped[list[str]] = mapped_column(JSON)
+    owner_role: Mapped[str] = mapped_column(String(80))
+    residual_risk: Mapped[RiskLevel] = mapped_column(Enum(RiskLevel))
+    acceptance_status: Mapped[str] = mapped_column(String(40))
+    exception_record: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    expires_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    review_on: Mapped[date] = mapped_column(Date)
+
+
+class EvaluationRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "evaluation_runs"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "dataset_id", "dataset_version", "code_version"),
+        Index("ix_evaluation_runs_tenant_status", "tenant_id", "status"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    dataset_id: Mapped[str] = mapped_column(String(120))
+    dataset_version: Mapped[str] = mapped_column(String(80))
+    sampling_method: Mapped[str] = mapped_column(String(160))
+    metrics: Mapped[dict[str, int | float | str]] = mapped_column(JSON)
+    thresholds: Mapped[dict[str, int | float | str]] = mapped_column(JSON)
+    status: Mapped[EvaluationGateStatus] = mapped_column(Enum(EvaluationGateStatus))
+    code_version: Mapped[str] = mapped_column(String(80))
+    model_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    failures: Mapped[list[str]] = mapped_column(JSON)
+    reviewer_disposition: Mapped[str] = mapped_column(String(80))
+    duration_ms: Mapped[int] = mapped_column(Integer)
+
+
+class HumanReviewCase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "human_review_cases"
+    __table_args__ = (Index("ix_human_review_tenant_status", "tenant_id", "status"),)
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    execution_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("agent_executions.id", ondelete="RESTRICT"), nullable=True
+    )
+    recommendation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("recommendations.id", ondelete="RESTRICT"), nullable=True
+    )
+    requested_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+    source: Mapped[str] = mapped_column(String(60))
+    reason: Mapped[str] = mapped_column(Text)
+    risk_level: Mapped[RiskLevel] = mapped_column(Enum(RiskLevel))
+    status: Mapped[HumanReviewStatus] = mapped_column(Enum(HumanReviewStatus))
+    evidence_ids: Mapped[list[str]] = mapped_column(JSON)
+    artifact_lineage: Mapped[dict[str, str]] = mapped_column(JSON)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class HumanDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "human_decisions"
+    __table_args__ = (Index("ix_human_decisions_case_created", "review_case_id", "created_at"),)
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    review_case_id: Mapped[UUID] = mapped_column(
+        ForeignKey("human_review_cases.id", ondelete="RESTRICT")
+    )
+    reviewer_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    outcome: Mapped[HumanDecisionOutcome] = mapped_column(Enum(HumanDecisionOutcome))
+    reason: Mapped[str] = mapped_column(Text)
+    source_evidence: Mapped[list[str]] = mapped_column(JSON)
+    artifact_lineage: Mapped[dict[str, str]] = mapped_column(JSON)

@@ -35,6 +35,7 @@ def _response(execution, events, recommendations) -> AgentRunResponse:  # type: 
         total_latency_ms=execution.total_latency_ms,
         total_input_tokens=execution.total_input_tokens,
         total_output_tokens=execution.total_output_tokens,
+        artifact_lineage=execution.artifact_lineage,
         events=[AgentEventResponse.model_validate(item) for item in events],
         recommendations=[RecommendationResponse.model_validate(item) for item in recommendations],
         created_at=execution.created_at,
@@ -64,9 +65,7 @@ async def post_agent_run(
         ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    loaded = await get_execution(
-        session, tenant_id=context.tenant_id, execution_id=execution.id
-    )
+    loaded = await get_execution(session, tenant_id=context.tenant_id, execution_id=execution.id)
     if loaded is None:
         raise HTTPException(status_code=500, detail="agent execution was not persisted")
     return _response(*loaded)
@@ -78,9 +77,7 @@ async def read_agent_run(
     context: Annotated[TenantContext, Depends(tenant_context)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentRunResponse:
-    loaded = await get_execution(
-        session, tenant_id=context.tenant_id, execution_id=execution_id
-    )
+    loaded = await get_execution(session, tenant_id=context.tenant_id, execution_id=execution_id)
     if loaded is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="agent run not found")
     return _response(*loaded)

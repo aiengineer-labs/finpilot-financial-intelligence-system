@@ -116,7 +116,8 @@ class AdviceWorkflow:
         builder.add_edge("behavior_analyst", "financial_advisor")
         builder.add_edge("financial_advisor", "verification")
         builder.add_conditional_edges(
-            "verification", self._route_verification,
+            "verification",
+            self._route_verification,
             {"accept": END, "revise": "critic", "reject": END},
         )
         builder.add_edge("critic", "revision")
@@ -179,9 +180,7 @@ class AdviceWorkflow:
             "details": {"status": status.value, "reasons": reasons},
         }
         final = (
-            _render_accepted(draft, state["context"])
-            if status is VerificationStatus.ACCEPT
-            else ""
+            _render_accepted(draft, state["context"]) if status is VerificationStatus.ACCEPT else ""
         )
         if status in {VerificationStatus.REJECT, VerificationStatus.INSUFFICIENT_DATA}:
             final = "Advice was withheld because deterministic financial verification did not pass."
@@ -201,7 +200,9 @@ class AdviceWorkflow:
 
     async def _critic_node(self, state: AdviceState) -> dict[str, Any]:
         result = await self._critic.run(
-            state["question"], state["context"], AdvisorOutput.model_validate(state["draft"]),
+            state["question"],
+            state["context"],
+            AdvisorOutput.model_validate(state["draft"]),
             state["verification_reasons"],
         )
         critique = cast(CriticOutput, result.payload)
@@ -210,7 +211,9 @@ class AdviceWorkflow:
 
     async def _revision(self, state: AdviceState) -> dict[str, Any]:
         result = await self._advisor.run(
-            state["question"], state["context"], AnalysisOutput.model_validate(state["analysis"]),
+            state["question"],
+            state["context"],
+            AnalysisOutput.model_validate(state["analysis"]),
             CriticOutput.model_validate(state["critique"]),
         )
         draft = cast(AdvisorOutput, result.payload)

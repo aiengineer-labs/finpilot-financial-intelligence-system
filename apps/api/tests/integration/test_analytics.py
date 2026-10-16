@@ -112,9 +112,7 @@ async def test_versioned_forecast_and_immutable_scenario_are_tenant_scoped(
         json={
             "forecast_id": forecast_body["id"],
             "name": "Laptop next month",
-            "shocks": [
-                {"day": "2026-09-10", "amount_minor": -750_000, "label": "Laptop"}
-            ],
+            "shocks": [{"day": "2026-09-10", "amount_minor": -750_000, "label": "Laptop"}],
         },
     )
     assert scenario.status_code == 201, scenario.text
@@ -124,14 +122,10 @@ async def test_versioned_forecast_and_immutable_scenario_are_tenant_scoped(
     assert len(scenario_body["points"]) == 30
 
     assert (
-        await client.get(
-            f"/api/v1/analytics/forecasts/{forecast_body['id']}", headers=headers_b
-        )
+        await client.get(f"/api/v1/analytics/forecasts/{forecast_body['id']}", headers=headers_b)
     ).status_code == 404
     assert (
-        await client.get(
-            f"/api/v1/analytics/scenarios/{scenario_body['id']}", headers=headers_b
-        )
+        await client.get(f"/api/v1/analytics/scenarios/{scenario_body['id']}", headers=headers_b)
     ).status_code == 404
 
     transport = FakeAgentTransport(
@@ -188,5 +182,47 @@ async def test_versioned_forecast_and_immutable_scenario_are_tenant_scoped(
         "verification",
     ]
     assert len(own_run.json()["recommendations"]) == 1
+    recommendation_id = own_run.json()["recommendations"][0]["id"]
+    original_lineage = own_run.json()["artifact_lineage"]
+    assert own_run.json()["recommendations"][0]["artifact_lineage"] == original_lineage
+    assert original_lineage["financial_verifier"]
+    proposed_prompt = await client.post(
+        "/api/v1/governance/artifacts",
+        headers=headers_a,
+        json={
+            "artifact_type": "prompt",
+            "name": "advice-prompts",
+            "version": "unapproved-v2",
+            "configuration": {"template_version": "unapproved-v2"},
+        },
+    )
+    assert proposed_prompt.status_code == 201
+    historical_run = await client.get(f"/api/v1/agent-runs/{execution.id}", headers=headers_a)
+    assert historical_run.json()["artifact_lineage"] == original_lineage
+    assert historical_run.json()["recommendations"][0]["artifact_lineage"] == original_lineage
     cross_run = await client.get(f"/api/v1/agent-runs/{execution.id}", headers=headers_b)
     assert cross_run.status_code == 404
+    recommendation_review = await client.post(
+        "/api/v1/governance/reviews",
+        headers=headers_a,
+        json={
+            "recommendation_id": recommendation_id,
+            "reason": "I want an independent review of the evidence for this recommendation.",
+            "risk_level": "medium",
+            "evidence_ids": [scenario_body["id"]],
+        },
+    )
+    assert recommendation_review.status_code == 201, recommendation_review.text
+    assert recommendation_review.json()["execution_id"] == str(execution.id)
+    assert recommendation_review.json()["artifact_lineage"] == original_lineage
+    cross_tenant_review = await client.post(
+        "/api/v1/governance/reviews",
+        headers=headers_b,
+        json={
+            "recommendation_id": recommendation_id,
+            "reason": "A different tenant must not be able to reference this recommendation.",
+            "risk_level": "medium",
+            "evidence_ids": [],
+        },
+    )
+    assert cross_tenant_review.status_code == 404

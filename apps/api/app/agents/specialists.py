@@ -84,8 +84,7 @@ class BehaviorAnalystAgent:
                 MeshMessage(
                     role="user",
                     content=(
-                        f"Question: {question}\nDeterministic context: "
-                        f"{_context_message(context)}"
+                        f"Question: {question}\nDeterministic context: {_context_message(context)}"
                     ),
                 ),
             ],
