@@ -18,7 +18,7 @@ const ARCHITECTURE: Array<{ id: string; icon: IconName; title: string; detail: s
 
 const STACK = [
   ["LangGraph", "Typed conditional workflow", "One bounded revision loop"],
-  ["FastAPI", "Authenticated API boundary", "Tenant derived server-side"],
+  ["FastAPI", "Isolated API boundary", "Synthetic workspace server-side"],
   ["PostgreSQL", "Versioned financial truth", "Immutable evidence lineage"],
   ["Mesh API", "Only model gateway", "Model, tokens and latency logged"],
   ["Next.js", "Operational console", "No fabricated live values"]
@@ -40,7 +40,7 @@ export function SystemMap({ agentRun, visibleEvents, setVisibleEvents }: Props) 
       <Panel className="span-12 system-intro">
         <p className="eyebrow">INSPECTABLE BY DESIGN</p>
         <h2 className="display">How FinPilot turns a statement into verified advice.</h2>
-        <p className="lede">Mesh handles semantics. Deterministic code owns money, authorization and release decisions — and every handoff below is persisted.</p>
+        <p className="lede">Mesh handles semantics. Deterministic code owns money, policy and release decisions — and every handoff below is persisted.</p>
         <div className="legend-inline"><span><i style={{ background: "var(--accent)" }} />Deterministic</span><span><i style={{ background: "var(--purple)" }} />Mesh-powered</span></div>
       </Panel>
 

@@ -8,7 +8,7 @@ import { STAGES, type StageId, VIEWS } from "./shared";
 
 type Props = {
   tenant: Tenant;
-  view: View;
+  view: View | null;
   open: boolean;
   badges: Partial<Record<View, number>>;
   completed: Set<StageId>;

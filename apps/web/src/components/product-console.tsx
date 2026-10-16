@@ -7,6 +7,7 @@ import { ForecastView, type RunConfig } from "./console/forecast";
 import { DigestView, GovernanceView } from "./console/governance";
 import { Inspector } from "./console/inspector";
 import { Ledger } from "./console/ledger";
+import { LiveDemo } from "./console/live-demo";
 import { Overview } from "./console/overview";
 import { type StageId, VIEWS } from "./console/shared";
 import { Sidebar } from "./console/sidebar";
@@ -27,6 +28,7 @@ import type {
 
 type Busy = null | "demo" | "account" | "upload" | "analysis" | "advisor" | "governance" | "digest" | "correction";
 type ActiveSession = { token: string; tenant: Tenant };
+type ProductMode = "demo" | "console" | "system";
 
 const LEDGER_PAGE = 200;
 const LEDGER_CAP = 1000;
@@ -75,6 +77,7 @@ function uploadStatement(auth: Session, accountId: string, file: File) {
 
 export function ProductConsole() {
   const [session, setSession] = useState<ActiveSession | null>(null);
+  const [mode, setMode] = useState<ProductMode>("demo");
   const [view, setView] = useState<View>("overview");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -102,7 +105,13 @@ export function ProductConsole() {
   const insights = useMemo(() => deriveInsights(transactions), [transactions]);
 
   function navigate(next: View) {
+    if (next === "system") {
+      setMode("system");
+      window.scrollTo({ top: 0 });
+      return;
+    }
     setView(next);
+    setMode("console");
     window.scrollTo({ top: 0 });
   }
 
@@ -423,7 +432,11 @@ export function ProductConsole() {
   if (agentRun) completed.add("advise");
   if (agentRun?.verification_status === "accept") completed.add("verify");
 
-  const meta = VIEWS.find((item) => item.id === view) ?? VIEWS[0];
+  const meta = mode === "demo"
+    ? { label: "Live Demo", subtitle: "A guided, end-to-end decision run" }
+    : mode === "system"
+      ? { label: "How it works", subtitle: "Architecture, agents and trace replay" }
+      : VIEWS.find((item) => item.id === view) ?? VIEWS[0];
   const working = busy !== null;
   const canAnalyse = Boolean(accounts[0] && transactions.length && config.asOf);
 
@@ -443,7 +456,7 @@ export function ProductConsole() {
     <div className={`app-shell ${inspectorOpen ? "inspector-open" : ""}`}>
       <Sidebar
         tenant={session.tenant}
-        view={view}
+        view={mode === "demo" ? null : mode === "system" ? "system" : view}
         open={sidebarOpen}
         badges={{ ledger: transactionTotal, governance: governance?.summary.pending_reviews, advice: agentRun?.recommendations.length }}
         completed={completed}
@@ -456,6 +469,11 @@ export function ProductConsole() {
         <header className="glass toolbar">
           <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Icon name="sidebar" size={17} /></button>
           <div className="toolbar-title"><h1>{meta.label}</h1><small>{meta.subtitle}</small></div>
+          <div className="mode-switch" role="tablist" aria-label="Product mode">
+            <button role="tab" aria-selected={mode === "demo"} className={mode === "demo" ? "active" : ""} onClick={() => setMode("demo")}><Icon name="play" size={13} />Live Demo</button>
+            <button role="tab" aria-selected={mode === "console"} className={mode === "console" ? "active" : ""} onClick={() => setMode("console")}><Icon name="terminal" size={13} />Console</button>
+            <button role="tab" aria-selected={mode === "system"} className={mode === "system" ? "active" : ""} onClick={() => setMode("system")}><Icon name="system" size={13} />How it works</button>
+          </div>
           <button className="search-trigger" onClick={() => setPaletteOpen(true)} aria-label="Open command palette"><Icon name="search" size={15} /><span>Search or jump to…</span><Kbd>⌘K</Kbd></button>
           <ThemeToggle />
           <button className={`icon-btn ${inspectorOpen ? "active" : ""}`} onClick={() => setInspectorOpen((open) => !open)} aria-label="Toggle agent log" aria-pressed={inspectorOpen}><Icon name="terminal" size={17} />{agentRun && <span className="badge-dot" />}</button>
@@ -466,14 +484,15 @@ export function ProductConsole() {
         </header>
 
         <div className={`view ${working ? "is-busy" : ""}`} key={view}>
-          {view === "overview" && <Overview insights={insights} transactions={transactions} snapshot={snapshot} hasAccount={accounts.length > 0} busy={working} onNavigate={navigate} onLoadSample={() => void importFile("sample")} onRunAnalysis={() => void runAnalysis()} />}
-          {view === "ledger" && <Ledger transactions={transactions} total={transactionTotal} hasAccount={accounts.length > 0} busy={working} uploadResult={uploadResult} onUpload={(file) => void importFile(file)} onLoadSample={() => void importFile("sample")} onCreateAccount={() => void createAccount()} onCorrect={correctCategory} />}
-          {view === "forecast" && <ForecastView config={config} setConfig={setConfig} snapshot={snapshot} forecast={forecast} scenario={scenario} canRun={canAnalyse} busy={working} onRunAnalysis={() => void runAnalysis()} onAskAdvisor={() => void askAdvisor()} />}
-          {view === "advice" && <AdvisorView run={agentRun} forecast={forecast} question={question} setQuestion={setQuestion} visibleEvents={visibleEvents} busy={working} onAsk={() => void askAdvisor()} />}
-          {view === "audit" && <AuditView run={agentRun} />}
-          {view === "governance" && <GovernanceView data={governance} busy={working} createDemo={() => void createGovernanceDemo()} rejectReview={(id) => void rejectReview(id)} />}
-          {view === "digests" && <DigestView preference={digestPreference} notifications={notifications} busy={working} savePreference={(enabled) => void saveDigestPreference(enabled)} />}
-          {view === "system" && <SystemMap agentRun={agentRun} visibleEvents={visibleEvents} setVisibleEvents={setVisibleEvents} />}
+          {mode === "demo" && <LiveDemo insights={insights} rowCount={transactionTotal} completed={completed} snapshot={snapshot} forecast={forecast} scenario={scenario} run={agentRun} busy={working} onRun={() => void runPipeline()} onOpenConsole={() => setMode("console")} onOpenHow={() => setMode("system")} />}
+          {mode === "console" && view === "overview" && <Overview insights={insights} transactions={transactions} snapshot={snapshot} hasAccount={accounts.length > 0} busy={working} onNavigate={navigate} onLoadSample={() => void importFile("sample")} onRunAnalysis={() => void runAnalysis()} />}
+          {mode === "console" && view === "ledger" && <Ledger transactions={transactions} total={transactionTotal} hasAccount={accounts.length > 0} busy={working} uploadResult={uploadResult} onUpload={(file) => void importFile(file)} onLoadSample={() => void importFile("sample")} onCreateAccount={() => void createAccount()} onCorrect={correctCategory} />}
+          {mode === "console" && view === "forecast" && <ForecastView config={config} setConfig={setConfig} snapshot={snapshot} forecast={forecast} scenario={scenario} canRun={canAnalyse} busy={working} onRunAnalysis={() => void runAnalysis()} onAskAdvisor={() => void askAdvisor()} />}
+          {mode === "console" && view === "advice" && <AdvisorView run={agentRun} forecast={forecast} question={question} setQuestion={setQuestion} visibleEvents={visibleEvents} busy={working} onAsk={() => void askAdvisor()} />}
+          {mode === "console" && view === "audit" && <AuditView run={agentRun} />}
+          {mode === "console" && view === "governance" && <GovernanceView data={governance} busy={working} createDemo={() => void createGovernanceDemo()} rejectReview={(id) => void rejectReview(id)} />}
+          {mode === "console" && view === "digests" && <DigestView preference={digestPreference} notifications={notifications} busy={working} savePreference={(enabled) => void saveDigestPreference(enabled)} />}
+          {mode === "system" && <SystemMap agentRun={agentRun} visibleEvents={visibleEvents} setVisibleEvents={setVisibleEvents} />}
         </div>
       </main>
 
