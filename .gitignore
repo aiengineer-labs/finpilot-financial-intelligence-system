@@ -223,6 +223,7 @@ uploads/
 private-data/
 *.csv
 !evaluation/datasets/*.csv
+!evaluation/security/*.csv
 *.dump
 *.sql
 .test-*.db
