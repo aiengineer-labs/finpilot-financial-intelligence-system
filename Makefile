@@ -37,7 +37,10 @@ docker-down:
 	docker compose down
 
 eval:
-	@echo "Evaluation runner becomes available with the first numerical engine slice."
+	docker run --rm -v "$(CURDIR):/workspace" -w /workspace/evaluation/promptfoo \
+		-e PROMPTFOO_PYTHON=python3 -e PROMPTFOO_DISABLE_TELEMETRY=true \
+		ghcr.io/promptfoo/promptfoo:0.124.1 \
+		promptfoo eval -c promptfooconfig.quick.yaml --no-cache
 
 seed-demo:
-	@echo "Synthetic demo seeding becomes available with the transaction slice."
+	cd apps/api && .venv/bin/python ../../scripts/seed_demo.py

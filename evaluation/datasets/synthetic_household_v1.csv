@@ -1,0 +1,142 @@
+Date,Debit,Credit,Merchant,Description,Transaction ID,Currency,Balance
+01/07/2026,,148500.00,ACME Payroll,Monthly salary credit,syn-0001,INR,273000.00
+01/07/2026,634.30,,Swiggy,Food delivery,syn-0002,INR,272365.70
+02/07/2026,20000.00,,HDFC Savings,Self transfer to savings,syn-0003,INR,252365.70
+03/07/2026,449.30,,Uber,Ride to office,syn-0004,INR,251916.40
+03/07/2026,38000.00,,Green Homes Rent,Monthly rent - Flat 4B,syn-0005,INR,213916.40
+04/07/2026,359.50,,Third Wave Cafe,Weekend dining,syn-0006,INR,213556.90
+05/07/2026,649.00,,Netflix,Netflix subscription,syn-0007,INR,212907.90
+05/07/2026,1169.00,,Flipkart,Online order,syn-0008,INR,211738.90
+05/07/2026,2925.00,,BigBasket,Weekly grocery order,syn-0009,INR,208813.90
+07/07/2026,442.40,,Uber,Ride to office,syn-0010,INR,208371.50
+08/07/2026,549.30,,Swiggy,Food delivery,syn-0011,INR,207822.20
+08/07/2026,1178.82,,Airtel Broadband,Broadband monthly plan,syn-0012,INR,206643.38
+10/07/2026,181.60,,Uber,Ride to office,syn-0013,INR,206461.78
+10/07/2026,1440.40,,Apollo Pharmacy,Pharmacy purchase,syn-0014,INR,205021.38
+11/07/2026,715.70,,Swiggy,Weekend dining,syn-0015,INR,204305.68
+12/07/2026,119.00,,Spotify,Spotify Premium,syn-0016,INR,204186.68
+12/07/2026,3285.50,,BigBasket,Weekly grocery order,syn-0017,INR,200901.18
+14/07/2026,199.90,,Uber,Ride to office,syn-0018,INR,200701.28
+15/07/2026,474.50,,Swiggy,Food delivery,syn-0019,INR,200226.78
+15/07/2026,2184.00,,BESCOM Electricity,Electricity bill,syn-0020,INR,198042.78
+16/07/2026,3158.00,,Amazon,Online order,syn-0021,INR,194884.78
+17/07/2026,265.90,,Uber,Ride to office,syn-0022,INR,194618.88
+18/07/2026,753.10,,Zomato,Weekend dining,syn-0023,INR,193865.78
+18/07/2026,9898.00,,Bank Credit Card,Credit card payment,syn-0024,INR,183967.78
+19/07/2026,2627.00,,BigBasket,Weekly grocery order,syn-0025,INR,181340.78
+20/07/2026,399.00,,Jio Mobile Bill,Mobile bill postpaid,syn-0026,INR,180941.78
+21/07/2026,212.10,,Uber,Ride to office,syn-0027,INR,180729.68
+22/07/2026,609.20,,Swiggy,Food delivery,syn-0028,INR,180120.48
+22/07/2026,1999.00,,Cult Fit,Gym membership,syn-0029,INR,178121.48
+24/07/2026,,18500.00,Upwork Global,Freelance design project,syn-0030,INR,196621.48
+24/07/2026,189.90,,Uber,Ride to office,syn-0031,INR,196431.58
+25/07/2026,338.50,,Swiggy,Weekend dining,syn-0032,INR,196093.08
+25/07/2026,500.00,,Namma Metro,Metro card recharge,syn-0033,INR,195593.08
+26/07/2026,363.70,,Apollo Pharmacy,Pharmacy purchase,syn-0034,INR,195229.38
+26/07/2026,3014.00,,BigBasket,Weekly grocery order,syn-0035,INR,192215.38
+27/07/2026,1467.00,,Flipkart,Online order,syn-0036,INR,190748.38
+28/07/2026,409.80,,Uber,Ride to office,syn-0037,INR,190338.58
+29/07/2026,508.50,,Swiggy,Food delivery,syn-0038,INR,189830.08
+31/07/2026,274.40,,Uber,Ride to office,syn-0039,INR,189555.68
+01/08/2026,,148500.00,ACME Payroll,Monthly salary credit,syn-0040,INR,338055.68
+01/08/2026,466.30,,Third Wave Cafe,Weekend dining,syn-0041,INR,337589.38
+02/08/2026,2306.50,,BigBasket,Weekly grocery order,syn-0042,INR,335282.88
+02/08/2026,20000.00,,HDFC Savings,Self transfer to savings,syn-0043,INR,315282.88
+03/08/2026,38000.00,,Green Homes Rent,Monthly rent - Flat 4B,syn-0044,INR,277282.88
+04/08/2026,260.00,,Uber,Ride to office,syn-0045,INR,277022.88
+05/08/2026,649.00,,Netflix,Netflix subscription,syn-0046,INR,276373.88
+05/08/2026,675.30,,Swiggy,Food delivery,syn-0047,INR,275698.58
+05/08/2026,675.30,,Swiggy,Food delivery,syn-0047,INR,275698.58
+31/09/2026,450.00,,Swiggy,Food delivery,syn-invalid-date,INR,
+07/08/2026,180.60,,Uber,Ride to office,syn-0048,INR,275517.98
+07/08/2026,1801.00,,Flipkart,Online order,syn-0049,INR,273716.98
+08/08/2026,653.90,,Swiggy,Weekend dining,syn-0050,INR,273063.08
+08/08/2026,1178.82,,Airtel Broadband,Broadband monthly plan,syn-0051,INR,271884.26
+09/08/2026,2108.00,,BigBasket,Weekly grocery order,syn-0052,INR,269776.26
+11/08/2026,366.60,,Uber,Ride to office,syn-0053,INR,269409.66
+11/08/2026,796.70,,Apollo Pharmacy,Pharmacy purchase,syn-0054,INR,268612.96
+12/08/2026,119.00,,Spotify,Spotify Premium,syn-0055,INR,268493.96
+12/08/2026,660.40,,Swiggy,Food delivery,syn-0056,INR,267833.56
+14/08/2026,340.00,,Uber,Ride to office,syn-0057,INR,267493.56
+14/08/2026,11850.00,,Taj Restaurant,Anniversary dinner,syn-0058,INR,255643.56
+15/08/2026,817.40,,Third Wave Cafe,Weekend dining,syn-0059,INR,254826.16
+15/08/2026,2436.50,,BESCOM Electricity,Electricity bill,syn-0060,INR,252389.66
+16/08/2026,3387.00,,BigBasket,Weekly grocery order,syn-0061,INR,249002.66
+18/08/2026,272.00,,Uber,Ride to office,syn-0062,INR,248730.66
+18/08/2026,2198.00,,Flipkart,Online order,syn-0063,INR,246532.66
+18/08/2026,14379.00,,Bank Credit Card,Credit card payment,syn-0064,INR,232153.66
+19/08/2026,655.20,,Swiggy,Food delivery,syn-0065,INR,231498.46
+20/08/2026,399.00,,Jio Mobile Bill,Mobile bill postpaid,syn-0066,INR,231099.46
+21/08/2026,,2199.00,Amazon,Order refund - returned shoes,syn-0067,INR,233298.46
+21/08/2026,476.90,,Uber,Ride to office,syn-0068,INR,232821.56
+22/08/2026,820.80,,Zomato,Weekend dining,syn-0069,INR,232000.76
+22/08/2026,1999.00,,Cult Fit,Gym membership,syn-0070,INR,230001.76
+23/08/2026,3229.50,,BigBasket,Weekly grocery order,syn-0071,INR,226772.26
+25/08/2026,366.00,,Uber,Ride to office,syn-0072,INR,226406.26
+25/08/2026,500.00,,Namma Metro,Metro card recharge,syn-0073,INR,225906.26
+26/08/2026,475.70,,Swiggy,Food delivery,syn-0074,INR,225430.56
+27/08/2026,1314.90,,Apollo Pharmacy,Pharmacy purchase,syn-0075,INR,224115.66
+28/08/2026,441.30,,Uber,Ride to office,syn-0076,INR,223674.36
+29/08/2026,485.10,,Zomato,Weekend dining,syn-0077,INR,223189.26
+29/08/2026,830.00,,Amazon,Online order,syn-0078,INR,222359.26
+30/08/2026,2454.50,,BigBasket,Weekly grocery order,syn-0079,INR,219904.76
+01/09/2026,,148500.00,ACME Payroll,Monthly salary credit,syn-0080,INR,368404.76
+01/09/2026,196.20,,Uber,Ride to office,syn-0081,INR,368208.56
+02/09/2026,627.90,,Swiggy,Food delivery,syn-0082,INR,367580.66
+02/09/2026,20000.00,,HDFC Savings,Self transfer to savings,syn-0083,INR,347580.66
+03/09/2026,38000.00,,Green Homes Rent,Monthly rent - Flat 4B,syn-0084,INR,309580.66
+04/09/2026,181.40,,Uber,Ride to office,syn-0085,INR,309399.26
+05/09/2026,649.00,,Netflix,Netflix subscription,syn-0086,INR,308750.26
+05/09/2026,673.40,,Swiggy,Weekend dining,syn-0087,INR,308076.86
+06/09/2026,3239.50,,BigBasket,Weekly grocery order,syn-0088,INR,304837.36
+08/09/2026,312.30,,Uber,Ride to office,syn-0089,INR,304525.06
+08/09/2026,1178.82,,Airtel Broadband,Broadband monthly plan,syn-0090,INR,303346.24
+09/09/2026,498.40,,Swiggy,Food delivery,syn-0091,INR,302847.84
+09/09/2026,3178.00,,Flipkart,Online order,syn-0092,INR,299669.84
+09/09/2026,24990.00,,Flipkart,Noise-cancelling headphones,syn-0093,INR,274679.84
+11/09/2026,286.40,,Uber,Ride to office,syn-0094,INR,274393.44
+12/09/2026,119.00,,Spotify,Spotify Premium,syn-0095,INR,274274.44
+12/09/2026,835.40,,Zomato,Weekend dining,syn-0096,INR,273439.04
+12/09/2026,846.70,,Apollo Pharmacy,Pharmacy purchase,syn-0097,INR,272592.34
+13/09/2026,2555.50,,BigBasket,Weekly grocery order,syn-0098,INR,270036.84
+15/09/2026,273.20,,Uber,Ride to office,syn-0099,INR,269763.64
+15/09/2026,2012.75,,BESCOM Electricity,Electricity bill,syn-0100,INR,267750.89
+16/09/2026,545.60,,Swiggy,Food delivery,syn-0101,INR,267205.29
+18/09/2026,394.10,,Uber,Ride to office,syn-0102,INR,266811.19
+18/09/2026,13898.00,,Bank Credit Card,Credit card payment,syn-0103,INR,252913.19
+19/09/2026,,27250.00,Upwork Global,Freelance design project,syn-0104,INR,280163.19
+19/09/2026,840.00,,Zomato,Weekend dining,syn-0105,INR,279323.19
+20/09/2026,399.00,,Jio Mobile Bill,Mobile bill postpaid,syn-0106,INR,278924.19
+20/09/2026,1989.00,,BigBasket,Weekly grocery order,syn-0107,INR,276935.19
+20/09/2026,2220.00,,Amazon,Online order,syn-0108,INR,274715.19
+22/09/2026,355.90,,Uber,Ride to office,syn-0109,INR,274359.29
+22/09/2026,1999.00,,Cult Fit,Gym membership,syn-0110,INR,272360.29
+23/09/2026,318.90,,Swiggy,Food delivery,syn-0111,INR,272041.39
+25/09/2026,385.20,,Uber,Ride to office,syn-0112,INR,271656.19
+25/09/2026,500.00,,Namma Metro,Metro card recharge,syn-0113,INR,271156.19
+26/09/2026,612.50,,Third Wave Cafe,Weekend dining,syn-0114,INR,270543.69
+26/09/2026,2140.00,,Uber,Airport ride,syn-0115,INR,268403.69
+27/09/2026,2285.50,,BigBasket,Weekly grocery order,syn-0116,INR,266118.19
+28/09/2026,332.80,,Apollo Pharmacy,Pharmacy purchase,syn-0117,INR,265785.39
+29/09/2026,358.30,,Uber,Ride to office,syn-0118,INR,265427.09
+30/09/2026,522.50,,Swiggy,Food delivery,syn-0119,INR,264904.59
+01/10/2026,,148500.00,ACME Payroll,Monthly salary credit,syn-0120,INR,413404.59
+01/10/2026,2982.00,,Amazon,Online order,syn-0121,INR,410422.59
+02/10/2026,386.80,,Uber,Ride to office,syn-0122,INR,410035.79
+02/10/2026,20000.00,,HDFC Savings,Self transfer to savings,syn-0123,INR,390035.79
+03/10/2026,370.80,,Third Wave Cafe,Weekend dining,syn-0124,INR,389664.99
+03/10/2026,38000.00,,Green Homes Rent,Monthly rent - Flat 4B,syn-0125,INR,351664.99
+04/10/2026,2011.00,,BigBasket,Weekly grocery order,syn-0126,INR,349653.99
+05/10/2026,649.00,,Netflix,Netflix subscription,syn-0127,INR,349004.99
+06/10/2026,365.50,,Uber,Ride to office,syn-0128,INR,348639.49
+07/10/2026,657.20,,Swiggy,Food delivery,syn-0129,INR,347982.29
+08/10/2026,1178.82,,Airtel Broadband,Broadband monthly plan,syn-0130,INR,346803.47
+09/10/2026,181.20,,Uber,Ride to office,syn-0131,INR,346622.27
+10/10/2026,409.60,,Third Wave Cafe,Weekend dining,syn-0132,INR,346212.67
+11/10/2026,1858.00,,BigBasket,Weekly grocery order,syn-0133,INR,344354.67
+12/10/2026,119.00,,Spotify,Spotify Premium,syn-0134,INR,344235.67
+12/10/2026,2860.00,,Flipkart,Online order,syn-0135,INR,341375.67
+13/10/2026,177.60,,Uber,Ride to office,syn-0136,INR,341198.07
+14/10/2026,515.60,,Swiggy,Food delivery,syn-0137,INR,340682.47
+14/10/2026,1180.20,,Apollo Pharmacy,Pharmacy purchase,syn-0138,INR,339502.27
+15/10/2026,1948.20,,BESCOM Electricity,Electricity bill,syn-0139,INR,337554.07
