@@ -22,7 +22,7 @@ export default async function Home() {
             for every recommendation.
           </p>
           <div className="actions">
-            <a className="primary" href="#system-status">Inspect system</a>
+            <a className="primary" href="/transactions">Open workspace</a>
             <a className="secondary" href="http://localhost:8000/docs">API contract</a>
           </div>
         </div>

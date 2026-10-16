@@ -28,6 +28,9 @@ open http://localhost:3000
 - `POST /api/v1/auth/login`: returns a short-lived bearer token.
 - `GET /api/v1/auth/me`: lists only the authenticated user's tenant memberships.
 - `GET|POST /api/v1/accounts`: requires bearer auth and `X-Tenant-ID`; membership is checked server-side.
+- `POST /api/v1/accounts/{account_id}/transaction-uploads`: validates and idempotently imports a mapped UTF-8 CSV.
+- `GET /api/v1/transactions`: paginated, tenant-scoped persisted ledger.
+- `PATCH /api/v1/transactions/{id}/category`: human correction with immutable correction lineage.
 
 Interactive OpenAPI is at `http://localhost:8000/docs` in local development.
 
@@ -60,6 +63,8 @@ git diff --check
 ```
 
 See [repository instructions](AGENTS.md), [threat model](docs/security/threat-model.md), and [local deployment](docs/deployment/local-docker.md).
+
+The browser workspace at `/transactions` signs in without persisting its bearer token, accepts an explicit JSON column mapping, displays row errors and duplicate counts, and renders only transactions returned by the authenticated API. The versioned golden statement in `evaluation/datasets/phase2_golden.csv` contains synthetic salary, expense, transfer, refund, duplicate, missing-balance, malformed-date, and prompt-injection-like description cases.
 
 ## Security posture and limitations
 
