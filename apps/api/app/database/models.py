@@ -46,6 +46,20 @@ class ClassificationMethod(StrEnum):
     HUMAN = "human"
 
 
+class AgentRunStatus(StrEnum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    REJECTED = "rejected"
+    FAILED = "failed"
+
+
+class VerificationStatus(StrEnum):
+    ACCEPT = "accept"
+    REVISE = "revise"
+    REJECT = "reject"
+    INSUFFICIENT_DATA = "insufficient_data"
+
+
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
 
@@ -269,3 +283,88 @@ class ScenarioPoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     balance_minor: Mapped[int] = mapped_column(BigInteger)
     recurring_flow_minor: Mapped[int] = mapped_column(BigInteger)
     estimated_variable_spend_minor: Mapped[int] = mapped_column(BigInteger)
+
+
+class AgentExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "agent_executions"
+    __table_args__ = (Index("ix_agent_executions_tenant_created", "tenant_id", "created_at"),)
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    requested_by_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    snapshot_id: Mapped[UUID] = mapped_column(
+        ForeignKey("calculation_snapshots.id", ondelete="RESTRICT")
+    )
+    forecast_id: Mapped[UUID] = mapped_column(ForeignKey("forecasts.id", ondelete="RESTRICT"))
+    scenario_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("scenario_runs.id", ondelete="RESTRICT"), nullable=True
+    )
+    question: Mapped[str] = mapped_column(String(1000))
+    intent: Mapped[str] = mapped_column(String(40))
+    status: Mapped[AgentRunStatus] = mapped_column(Enum(AgentRunStatus))
+    verification_status: Mapped[VerificationStatus] = mapped_column(Enum(VerificationStatus))
+    final_response: Mapped[str] = mapped_column(Text, default="")
+    graph_version: Mapped[str] = mapped_column(String(40))
+    prompt_version: Mapped[str] = mapped_column(String(40))
+    model_id: Mapped[str] = mapped_column(String(120))
+    revision_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    total_latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class AgentEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "agent_events"
+    __table_args__ = (
+        UniqueConstraint("execution_id", "sequence"),
+        Index("ix_agent_events_execution_sequence", "execution_id", "sequence"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("agent_executions.id", ondelete="CASCADE")
+    )
+    sequence: Mapped[int] = mapped_column(Integer)
+    node: Mapped[str] = mapped_column(String(50))
+    event_type: Mapped[str] = mapped_column(String(40))
+    summary: Mapped[str] = mapped_column(String(500))
+    details: Mapped[dict[str, str | int | bool | list[str]]] = mapped_column(JSON)
+    model_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class Recommendation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "recommendations"
+    __table_args__ = (Index("ix_recommendations_tenant_execution", "tenant_id", "execution_id"),)
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("agent_executions.id", ondelete="CASCADE")
+    )
+    rank: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(180))
+    explanation: Mapped[str] = mapped_column(Text)
+    amount_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    currency: Mapped[str] = mapped_column(String(3))
+    evidence_ids: Mapped[list[str]] = mapped_column(JSON)
+    assumptions: Mapped[list[str]] = mapped_column(JSON)
+    confidence_bps: Mapped[int] = mapped_column(Integer)
+    verification_status: Mapped[VerificationStatus] = mapped_column(Enum(VerificationStatus))
+
+
+class FinancialVerification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "financial_verifications"
+    __table_args__ = (Index("ix_verifications_tenant_execution", "tenant_id", "execution_id"),)
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    execution_id: Mapped[UUID] = mapped_column(
+        ForeignKey("agent_executions.id", ondelete="CASCADE")
+    )
+    recommendation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("recommendations.id", ondelete="CASCADE"), nullable=True
+    )
+    status: Mapped[VerificationStatus] = mapped_column(Enum(VerificationStatus))
+    reasons: Mapped[list[str]] = mapped_column(JSON)
+    checked_values: Mapped[dict[str, str | int | list[str]]] = mapped_column(JSON)
+    verifier_version: Mapped[str] = mapped_column(String(40))

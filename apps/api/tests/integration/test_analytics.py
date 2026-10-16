@@ -1,9 +1,31 @@
 import json
+from typing import Any
+from uuid import UUID
 
 from httpx import AsyncClient
+from pydantic import SecretStr
+
+from app.core.settings import Settings
+from app.database.session import SessionFactory
+from app.integrations.mesh import MeshClient
+from app.services.agent_runs import execute_advice
 
 
-async def _identity(client: AsyncClient, email: str, household: str) -> tuple[str, str]:
+class FakeAgentTransport:
+    def __init__(self, contents: list[dict[str, Any]]) -> None:
+        self.contents = contents
+
+    async def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        content = self.contents.pop(0)
+        return {
+            "id": "fake-agent",
+            "model": "mesh-test-model",
+            "choices": [{"message": {"content": json.dumps(content)}}],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 8},
+        }
+
+
+async def _identity(client: AsyncClient, email: str, household: str) -> tuple[str, str, str]:
     registered = await client.post(
         "/api/v1/auth/register",
         json={
@@ -14,14 +36,16 @@ async def _identity(client: AsyncClient, email: str, household: str) -> tuple[st
     )
     token = registered.json()["access_token"]
     me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
-    return token, me.json()["tenants"][0]["id"]
+    return token, me.json()["tenants"][0]["id"], me.json()["id"]
 
 
 async def test_versioned_forecast_and_immutable_scenario_are_tenant_scoped(
     client: AsyncClient,
 ) -> None:
-    token_a, tenant_a = await _identity(client, "analytics-a@example.com", "Analytics Alpha")
-    token_b, tenant_b = await _identity(client, "analytics-b@example.com", "Analytics Beta")
+    token_a, tenant_a, user_a = await _identity(
+        client, "analytics-a@example.com", "Analytics Alpha"
+    )
+    token_b, tenant_b, _ = await _identity(client, "analytics-b@example.com", "Analytics Beta")
     headers_a = {"Authorization": f"Bearer {token_a}", "X-Tenant-ID": tenant_a}
     headers_b = {"Authorization": f"Bearer {token_b}", "X-Tenant-ID": tenant_b}
     account = await client.post(
@@ -109,3 +133,58 @@ async def test_versioned_forecast_and_immutable_scenario_are_tenant_scoped(
             f"/api/v1/analytics/scenarios/{scenario_body['id']}", headers=headers_b
         )
     ).status_code == 404
+
+    transport = FakeAgentTransport(
+        [
+            {
+                "findings": [
+                    {
+                        "finding": "The simulated purchase creates a shortfall.",
+                        "evidence_ids": [scenario_body["id"]],
+                        "limitation": "Only recorded assumptions are included.",
+                    }
+                ],
+                "summary": "The deterministic scenario falls below zero.",
+            },
+            {
+                "recommendations": [
+                    {
+                        "title": "Delay or reduce the purchase",
+                        "explanation": "The scenario evidence shows a projected shortfall.",
+                        "amount_minor": 750_000,
+                        "currency": "INR",
+                        "evidence_ids": [scenario_body["id"]],
+                        "assumptions": ["No unobserved income"],
+                        "confidence_bps": 8500,
+                    }
+                ]
+            },
+        ]
+    )
+    settings = Settings(
+        session_secret=SecretStr("test-only-secret-with-at-least-thirty-two-chars"),
+        database_url="sqlite+aiosqlite://",
+        mesh_model="mesh-test-model",
+    )
+    async with SessionFactory() as session:
+        execution = await execute_advice(
+            session,
+            tenant_id=UUID(tenant_a),
+            user_id=UUID(user_a),
+            forecast_id=UUID(forecast_body["id"]),
+            scenario_id=UUID(scenario_body["id"]),
+            question="Can I afford this purchase without a shortfall?",
+            mesh=MeshClient(settings, transport),
+        )
+    own_run = await client.get(f"/api/v1/agent-runs/{execution.id}", headers=headers_a)
+    assert own_run.status_code == 200, own_run.text
+    assert own_run.json()["verification_status"] == "accept"
+    assert [event["node"] for event in own_run.json()["events"]] == [
+        "supervisor",
+        "behavior_analyst",
+        "financial_advisor",
+        "verification",
+    ]
+    assert len(own_run.json()["recommendations"]) == 1
+    cross_run = await client.get(f"/api/v1/agent-runs/{execution.id}", headers=headers_b)
+    assert cross_run.status_code == 404

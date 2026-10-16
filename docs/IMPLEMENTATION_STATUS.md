@@ -4,7 +4,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 
 ## Environment
 
-- Repository: `feat/phase-1-foundation`; Phase 1 commit `0fa8e5d`, Phase 2 commit `4621a87`, Phase 3 engine checkpoint `cf19fe6`, based on `origin/main` at `1a3f50e`.
+- Repository: `feat/phase-1-foundation`; Phase 1 commit `0fa8e5d`, Phase 2 commit `4621a87`, Phase 3 engine checkpoint `cf19fe6`, and Phase 3 persistence/UI commit `59042a7`, based on `origin/main` at `1a3f50e`.
 - Available: Python 3.14.7, uv 0.7.13, Node 22.15.0, Corepack 0.32.0, Docker CLI 29.8.2, Compose 5.6.0, Git 2.55.0.
 - Installed/project-managed: Python 3.12.11 virtualenv (`apps/api/.venv`), locked backend dependencies, Corepack pnpm 10.18.3, locked frontend dependencies, Docker daemon 29.8.2.
 - Missing globally: standalone `psql` and `vercel` (PostgreSQL validation uses the pinned container CLI). Docker Desktop was started for integration verification.
@@ -15,8 +15,8 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 - **Phase 1 — VERIFIED:** FastAPI/Next/PostgreSQL foundation, Argon2/JWT auth, server-side membership isolation, Mesh-only adapter, input/tool policy, Alembic, Docker, CI, and tests. Verified with a real local PostgreSQL container; live Mesh remains credential-blocked and is not part of the no-inference foundation gate.
 - **Phase 2 — VERIFIED:** tenant-scoped account uploads, explicit mappings/date formats, exact minor-unit amounts, row errors, duplicate upload/row prevention, refund/transfer semantics, missing-balance truth, deterministic categorization with Mesh-required routing for ambiguity, human correction lineage, persisted explorer API, and functional browser workspace.
 - **Phase 3 — VERIFIED:** recurrence, robust anomaly detection, chronological backtesting, immutable calculation snapshots, persisted 30/60/90 daily forecasts/points, tenant-scoped APIs, scenario branches, and the browser forecast studio are implemented and tested against PostgreSQL.
-- **Phase 4 — NOT_STARTED:** LangGraph agents, correction loop, verifier, and audit trail.
-- **Phase 5 — NOT_STARTED:** complete browser-visible product and E2E journey.
+- **Phase 4 — IMPLEMENTED / LIVE VERIFICATION PENDING:** real typed LangGraph workflow, separate behavior analyst/advisor/critic agents through the Mesh-only adapter, bounded correction routing, independent deterministic financial verifier, fail-closed release, persisted execution events/recommendations/verifications, tenant-safe APIs, and PostgreSQL audit lineage. Static, unit, integration, and database gates pass; the final live inference smoke is pending explicit approval to transmit synthetic forecast context to Mesh.
+- **Phase 5 — IN_PROGRESS:** the main route is now a production-style responsive operations console with authentication, account creation, CSV upload, live ledger metrics, snapshot/forecast/scenario execution, advice, audit views, persisted event replay, and a browser-visible “How it works” system map. Signed-out, authenticated, and architecture modes were visually verified in Chrome; full browser automation of an external-inference run remains pending the same Mesh egress approval.
 - **Phase 6 — NOT_STARTED:** NeMo/Presidio hardening and 100+ case red-team evaluation.
 - **Phase 6b — NOT_STARTED:** governance versions, lineage, approvals, risk controls, and UI.
 - **Phase 7 — NOT_STARTED:** durable digest scheduling and performance profiling.
@@ -55,14 +55,20 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 | 2026-10-16 | PostgreSQL analytics migration | PASS: Docker rebuild completed; Alembic head `20261016_0003`; six analytics tables verified |
 | 2026-10-16 | live analytics API smoke | PASS: persisted snapshot/30-day forecast and ₹75,000 laptop scenario; scenario minimum ₹5,500, no projected shortfall |
 | 2026-10-16 | Chrome forecast studio smoke | PASS: authenticated synthetic tenant rendered source evidence, baseline curve, scenario curve, assumptions, and shortfall result from live API records |
+| 2026-10-16 | Phase 4 backend gates | PASS: Ruff; strict mypy over 43 application modules; 22 tests; 81% line coverage |
+| 2026-10-16 | Phase 4 frontend gates | PASS: ESLint with zero warnings, strict TypeScript, Next 16.4.2 production build; `/`, `/forecast`, and `/transactions` generated |
+| 2026-10-16 | PostgreSQL agent-audit migration | PASS: Docker rebuild completed; API/PostgreSQL healthy; Alembic head `20261016_0004`; `agent_executions`, `agent_events`, `recommendations`, and `financial_verifications` verified |
+| 2026-10-16 | Chrome unified-console smoke | PASS: redesigned signed-out landing, authenticated tenant dashboard with five source rows and exact metrics, and “How it works” workflow all visibly rendered from the Docker stack |
+| 2026-10-16 | Mesh model discovery | PASS: authenticated Mesh model catalog includes configured `openai/gpt-5.4-mini`; local ignored `.env` updated without exposing or committing the credential |
+| 2026-10-16 | Live Mesh financial-context smoke | BLOCKED BY REQUIRED APPROVAL: environment refused external transmission of forecast/scenario-derived context; no bypass attempted and no deployment/inference success claimed |
 
 ## External blockers
 
-- Live Mesh tests require `MESH_API_KEY` and a verified organizer-supported model.
+- Live Mesh credentials and `openai/gpt-5.4-mini` are configured locally, but transmitting even synthetic forecast/scenario context to Mesh requires explicit approval in the current controlled environment.
 - Vercel deployment requires authenticated Vercel access and managed PostgreSQL credentials.
 - Official submission checks require GitHub secrets `MESH_API_KEY` and `SUBMISSION_TOKEN`.
 - Official GitHub workflow execution still requires repository secrets and observed workflow results; a successful branch push is not CI success.
 
 ## Next executable step
 
-Implement Phase 4 as a real LangGraph workflow with typed state, distinct Mesh-only specialist prompts, bounded critic/revision routing, deterministic financial verification, persisted agent executions/events and recommendation lineage; expose live-run/audit APIs and redesign the product shell with live and “How it works” modes backed only by verified capabilities.
+After explicit Mesh egress approval, run and record the live specialist workflow through the authenticated API and browser console. In parallel, continue the unblocked Phase 6 security slice: NeMo Guardrails integration boundary, PII handling, and the versioned prompt-injection/red-team evaluation suite.
