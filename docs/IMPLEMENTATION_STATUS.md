@@ -17,7 +17,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 - **Phase 3 — VERIFIED:** recurrence, robust anomaly detection, chronological backtesting, immutable calculation snapshots, persisted 30/60/90 daily forecasts/points, tenant-scoped APIs, scenario branches, and the browser forecast studio are implemented and tested against PostgreSQL.
 - **Phase 4 — IMPLEMENTED / LIVE VERIFICATION PENDING:** real typed LangGraph workflow, separate behavior analyst/advisor/critic agents through the Mesh-only adapter, bounded correction routing, independent deterministic financial verifier, fail-closed release, persisted execution events/recommendations/verifications, tenant-safe APIs, and PostgreSQL audit lineage. Static, unit, integration, and database gates pass; the final live inference smoke is pending explicit approval to transmit synthetic forecast context to Mesh.
 - **Phase 5 — IN_PROGRESS:** the main route is now a production-style responsive operations console with authentication, account creation, CSV upload, live ledger metrics, snapshot/forecast/scenario execution, advice, audit views, persisted event replay, and a browser-visible “How it works” system map. Signed-out, authenticated, and architecture modes were visually verified in Chrome; full browser automation of an external-inference run remains pending the same Mesh egress approval.
-- **Phase 6 — NOT_STARTED:** NeMo/Presidio hardening and 100+ case red-team evaluation.
+- **Phase 6 — IN_PROGRESS:** deterministic prompt-injection normalization now covers Unicode/full-width confusables, zero-width controls, HTML entities, double URL encoding, and base64 payloads. A versioned pytest matrix contains 168 attack variants and 16 legitimate financial controls; the measured local result is 0/168 missed attacks and 0/16 false positives. This is a bounded regression result, not an immunity claim. NeMo, Presidio, Promptfoo, SAST, secret, and container-depth gates remain.
 - **Phase 6b — NOT_STARTED:** governance versions, lineage, approvals, risk controls, and UI.
 - **Phase 7 — NOT_STARTED:** durable digest scheduling and performance profiling.
 - **Phase 8 — NOT_STARTED:** reproducibility, documentation, evaluation, Vercel readiness/deployment evidence, official workflow.
@@ -61,6 +61,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 | 2026-10-16 | Chrome unified-console smoke | PASS: redesigned signed-out landing, authenticated tenant dashboard with five source rows and exact metrics, and “How it works” workflow all visibly rendered from the Docker stack |
 | 2026-10-16 | Mesh model discovery | PASS: authenticated Mesh model catalog includes configured `openai/gpt-5.4-mini`; local ignored `.env` updated without exposing or committing the credential |
 | 2026-10-16 | Live Mesh financial-context smoke | BLOCKED BY REQUIRED APPROVAL: environment refused external transmission of forecast/scenario-derived context; no bypass attempted and no deployment/inference success claimed |
+| 2026-10-16 | Phase 6 deterministic injection regression | PASS: 168 encoded/wrapped attack variants blocked; 16 legitimate financial phrases allowed; full backend suite 207 tests, 81% line coverage |
 
 ## External blockers
 
@@ -71,4 +72,4 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 
 ## Next executable step
 
-After explicit Mesh egress approval, run and record the live specialist workflow through the authenticated API and browser console. In parallel, continue the unblocked Phase 6 security slice: NeMo Guardrails integration boundary, PII handling, and the versioned prompt-injection/red-team evaluation suite.
+After explicit Mesh egress approval, run and record the live specialist workflow through the authenticated API and browser console. Continue Phase 6 with a compatible NeMo Guardrails execution boundary, targeted Presidio minimization, Promptfoo/Mesh configuration, and SAST/secrets/container scanning with measured reports.
