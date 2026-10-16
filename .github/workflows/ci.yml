@@ -44,3 +44,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose config --quiet
+
+  evaluation-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Promptfoo configurations
+        run: >-
+          docker run --rm
+          -v "$PWD:/workspace"
+          -w /workspace/evaluation/promptfoo
+          ghcr.io/promptfoo/promptfoo:0.124.1
+          promptfoo validate config
+          -c promptfooconfig.quick.yaml
+          -c promptfooconfig.redteam.yaml
+      - name: Run offline security regression
+        run: >-
+          docker run --rm
+          -v "$PWD:/workspace"
+          -w /workspace/evaluation/promptfoo
+          -e PROMPTFOO_PYTHON=python3
+          -e PROMPTFOO_DISABLE_TELEMETRY=true
+          ghcr.io/promptfoo/promptfoo:0.124.1
+          promptfoo eval -c promptfooconfig.quick.yaml --no-cache

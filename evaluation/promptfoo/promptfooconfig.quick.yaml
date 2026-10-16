@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: FinPilot deterministic prompt-injection and false-positive regression
+tags:
+  application: finpilot
+  lane: pull-request
+  inference: none
+
+prompts:
+  - "{{payload}}"
+
+providers:
+  - id: file://policy_provider.py
+    label: finpilot-production-input-policy
+
+tests: file://../security/prompt_injection_cases.csv
+
+evaluateOptions:
+  cache: false
+  maxConcurrency: 4
+  timeoutMs: 5000
+
+sharing: false
+writeLatestResults: false

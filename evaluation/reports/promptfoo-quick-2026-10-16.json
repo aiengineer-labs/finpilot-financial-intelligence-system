@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "evaluation": "FinPilot deterministic prompt-injection and false-positive regression",
+  "executed_at": "2026-10-16T16:13:38+05:30",
+  "tool": {
+    "name": "promptfoo",
+    "version": "0.124.1",
+    "container_digest": "sha256:a9213a6d35ecc60ac29f0dbb1183f2f8457f0a9e3f3f29d16f09277c87834c08"
+  },
+  "dataset": {
+    "path": "evaluation/security/prompt_injection_cases.csv",
+    "attack_cases": 168,
+    "benign_cases": 16,
+    "total_cases": 184
+  },
+  "result": {
+    "passed": 184,
+    "failed": 0,
+    "errors": 0,
+    "duration_ms": 2125,
+    "model_requests": 0,
+    "tokens": 0
+  },
+  "scope": "Deterministic production input policy only; this is not a claim of complete injection immunity.",
+  "model_based_redteam": {
+    "status": "not_run",
+    "reason": "External Mesh egress requires explicit authorization in the controlled environment."
+  }
+}

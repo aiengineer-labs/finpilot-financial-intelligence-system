@@ -4,7 +4,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 
 ## Environment
 
-- Repository: `feat/phase-1-foundation`; latest pushed checkpoint `2fd705c`, based on `origin/main` at `1a3f50e`. Earlier verified milestones: `0fa8e5d`, `4621a87`, `cf19fe6`, `59042a7`, and `f6c1a5b`.
+- Repository: `feat/phase-1-foundation`, based on `origin/main` at `1a3f50e`. Verified pushed milestones include `0fa8e5d`, `4621a87`, `cf19fe6`, `59042a7`, `f6c1a5b`, `2fd705c`, and `0c31d4a`; use Git history as the authority for newer checkpoints.
 - Available: Python 3.14.7, uv 0.7.13, Node 22.15.0, Corepack 0.32.0, Docker CLI 29.8.2, Compose 5.6.0, Git 2.55.0.
 - Installed/project-managed: Python 3.12.11 virtualenv (`apps/api/.venv`), locked backend dependencies, Corepack pnpm 10.18.3, locked frontend dependencies, Docker daemon 29.8.2.
 - Missing globally: standalone `psql` and `vercel` (PostgreSQL validation uses the pinned container CLI). Docker Desktop was started for integration verification.
@@ -17,7 +17,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 - **Phase 3 — VERIFIED:** recurrence, robust anomaly detection, chronological backtesting, immutable calculation snapshots, persisted 30/60/90 daily forecasts/points, tenant-scoped APIs, scenario branches, and the browser forecast studio are implemented and tested against PostgreSQL.
 - **Phase 4 — IMPLEMENTED / LIVE VERIFICATION PENDING:** real typed LangGraph workflow, separate behavior analyst/advisor/critic agents through the Mesh-only adapter, bounded correction routing, independent deterministic financial verifier, fail-closed release, persisted execution events/recommendations/verifications, tenant-safe APIs, and PostgreSQL audit lineage. Static, unit, integration, and database gates pass; the final live inference smoke is pending explicit approval to transmit synthetic forecast context to Mesh.
 - **Phase 5 — IN_PROGRESS:** the main route is now a production-style responsive operations console with authentication, account creation, CSV upload, live ledger metrics, snapshot/forecast/scenario execution, advice, audit views, persisted event replay, and a browser-visible “How it works” system map. Signed-out, authenticated, and architecture modes were visually verified in Chrome; full browser automation of an external-inference run remains pending the same Mesh egress approval.
-- **Phase 6 — IN_PROGRESS:** deterministic prompt-injection normalization covers Unicode/full-width confusables, zero-width controls, HTML entities, double URL encoding, and base64 payloads. NeMo Guardrails 0.24.1 input/output rails and Presidio pattern-based minimization are wired into the live agent path; guardrail/privacy events are persisted and NeMo performs no direct inference. A versioned pytest matrix contains 168 attack variants and 16 legitimate financial controls; the measured local result is 0/168 missed attacks and 0/16 false positives. This is a bounded regression result, not an immunity claim. Promptfoo, SAST, secret, and container-depth gates remain.
+- **Phase 6 — IMPLEMENTED / LIVE RED-TEAM PENDING:** deterministic prompt-injection normalization covers Unicode/full-width confusables, zero-width controls, HTML entities, double URL encoding, and Base64 payloads. NeMo Guardrails 0.24.1 input/output rails and Presidio pattern-based minimization are wired into the live agent path; guardrail/privacy events are persisted and NeMo performs no direct inference. Promptfoo 0.124.1 schema validation passes for an offline PR lane and a Mesh-only model-based lane. The offline lane measures 168 attack variants and 16 legitimate controls: 0/168 missed attacks and 0/16 false positives. Bandit, Gitleaks, pip-audit, and application-layer container high/critical gates pass. The full image retains one unresolved upstream Trixie zlib high CVE. The authorized model-based red team is not run because Mesh egress approval is pending. These are bounded results, not an immunity claim.
 - **Phase 6b — NOT_STARTED:** governance versions, lineage, approvals, risk controls, and UI.
 - **Phase 7 — NOT_STARTED:** durable digest scheduling and performance profiling.
 - **Phase 8 — NOT_STARTED:** reproducibility, documentation, evaluation, Vercel readiness/deployment evidence, official workflow.
@@ -69,6 +69,9 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 | 2026-10-16 | Bandit SAST | PASS after replacing three runtime `assert` statements with explicit error handling; zero remaining findings over 3,163 application lines |
 | 2026-10-16 | Gitleaks v8.29.1 committed-history scan | PASS: nine commits / approximately 771 KB scanned; no leaks found; ignored local `.env` was not treated as repository content |
 | 2026-10-16 | Docker Scout high/critical gate | PARTIAL: application-introduced packages 0 critical/0 high; full Trixie image 0 critical/1 high from unfixed Debian zlib CVE-2026-85091. Public release remains blocked pending an upstream fix or documented risk acceptance. |
+| 2026-10-16 | Promptfoo 0.124.1 config validation | PASS: pinned official container validates the offline and model-based configurations; target is the production policy function, model attacker and grader are both pinned to `https://api.meshapi.ai/v1`, and remote-only plugins/strategies are absent |
+| 2026-10-16 | Promptfoo offline security regression | PASS: 184/184 cases, 0 failures, 0 errors, 2,125 ms, 0 model calls/tokens; bounded ASR 0/168 and benign false-positive rate 0/16. Machine-readable report committed under `evaluation/reports/` |
+| 2026-10-16 | backend gates after Promptfoo integration | PASS: Ruff; strict mypy over 46 modules; 215 pytest tests; 82% line coverage |
 
 ## External blockers
 
@@ -79,4 +82,4 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 
 ## Next executable step
 
-After explicit Mesh egress approval, run and record the live specialist workflow through the authenticated API and browser console. Continue Phase 6 with Promptfoo/Mesh configuration plus SAST, secrets and container scanning with measured reports; then validate the Python function bundle against Vercel's current Large Functions path.
+Implement the Phase 6b functioning governance slice: versioned assets and risk controls, immutable decision lineage, human-review cases/decisions, authorization and promotion gates, tenant-scoped governance APIs, and the read-only governance console. After explicit Mesh egress approval, run and record the live specialist workflow and Promptfoo model-based red team. The unresolved base-image CVE and Vercel bundle/runtime measurement remain release-readiness work.
