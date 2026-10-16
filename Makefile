@@ -1,7 +1,7 @@
 UV := uv --project apps/api
 PNPM := corepack pnpm --dir apps/web
 
-.PHONY: setup dev-api dev-web lint typecheck test security-test migrate docker-up docker-down eval seed-demo
+.PHONY: setup dev-api dev-web lint typecheck test security-test migrate docker-up docker-down eval seed-demo requirements
 
 setup:
 	UV_CACHE_DIR=.cache/uv uv sync --project apps/api --python 3.12
@@ -44,3 +44,7 @@ eval:
 
 seed-demo:
 	cd apps/api && .venv/bin/python ../../scripts/seed_demo.py
+
+# Root requirements.txt (pinned runtime set for the organizer checks) is generated from apps/api/uv.lock.
+requirements:
+	uv export --project apps/api --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements.txt

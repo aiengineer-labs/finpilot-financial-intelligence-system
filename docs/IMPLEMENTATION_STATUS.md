@@ -86,6 +86,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 | 2026-10-16 | deterministic analytics on synthetic household | PASS: snapshot 139 rows, 11 recurring patterns, 3 high anomalies; ₹75,000 scenario no shortfall; ₹3,50,000 scenario first shortfall 2026-10-25 |
 | 2026-10-16 | glass console gates | PASS: Ruff; strict mypy over 52 modules; 220 pytest tests at 81% coverage; ESLint zero warnings; strict TypeScript; Next production build; `git diff --check`; Gitleaks 8.29.1 over changed files found no leaks. `make lint`/`make typecheck` frontend steps were run directly because local Corepack could not resolve its cached pnpm |
 | 2026-10-16 | headless Chrome UI smoke (Docker stack) | PASS: synthetic demo sign-up, import, Forecast analysis with shortfall preset, Ledger detail drawer, Governance, command palette, light/dark, and 390 px phone layout with zero horizontal overflow and zero console errors. Advisor/Run FinPilot not exercised (Mesh egress approval pending) |
+| 2026-10-16 | root `requirements.txt` for organizer checks | ADDED: exported from `apps/api/uv.lock` (136 pinned runtime packages, no dev tools) via `make requirements`; a clean Python 3.12 venv built only from it imports the API, advice graph, and guardrails; CI now fails if it drifts from the lock. Organizer result recording still returns 403 until the hackathon entry form is submitted |
 
 ## External blockers
 

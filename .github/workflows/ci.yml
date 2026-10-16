@@ -18,6 +18,10 @@ jobs:
           version: "0.7.13"
           enable-cache: true
       - run: uv sync --project apps/api --frozen --python 3.12
+      - name: Root requirements.txt matches uv.lock
+        run: |
+          uv export --project apps/api --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements.txt
+          git diff --exit-code requirements.txt
       - run: uv run --project apps/api ruff check apps/api/app apps/api/tests
       - run: cd apps/api && uv run mypy app
       - run: cd apps/api && uv run pytest -q --cov=app
