@@ -10,7 +10,7 @@ const DEFAULT_MAPPING = JSON.stringify({
 });
 
 type Mode = "live" | "system";
-type View = "overview" | "ledger" | "forecast" | "advice" | "audit" | "governance";
+type View = "overview" | "ledger" | "forecast" | "advice" | "audit" | "digests" | "governance";
 type Tenant = { id: string; name: string; role: string };
 type Account = { id: string; name: string; currency: string };
 type Transaction = {
@@ -33,6 +33,8 @@ type GovernanceRisk = { id: string; risk_id: string; category: string; likelihoo
 type EvaluationRun = { id: string; dataset_id: string; dataset_version: string; status: string; metrics: Record<string, number | string>; thresholds: Record<string, number | string>; model_id: string | null; failures: string[]; duration_ms: number; code_version: string };
 type HumanReview = { id: string; source: string; reason: string; risk_level: string; status: string; evidence_ids: string[]; artifact_lineage: Record<string, string>; requested_by_user_id: string | null; created_at: string };
 type GovernanceData = { summary: GovernanceSummary; artifacts: GovernanceArtifact[]; risks: GovernanceRisk[]; evaluations: EvaluationRun[]; reviews: HumanReview[] };
+type DigestPreference = { id: string; enabled: boolean; weekday: number; local_time: string; timezone: string; next_due_at: string; last_dispatched_at: string | null };
+type Notification = { id: string; digest_job_id: string; status: string; subject: string; body: string; delivered_at: string | null; created_at: string };
 
 const stages = [
   ["import", "Import"], ["categorize", "Categorize"], ["analyze", "Analyze"],
@@ -47,7 +49,8 @@ const architecture = [
   { id: "advisor", icon: "◇", title: "Financial advisor", detail: "Drafts bounded options citing only supplied snapshot, forecast and scenario evidence.", runtime: "LangGraph · Mesh" },
   { id: "critic", icon: "◎", title: "Critic loop", detail: "Challenges unsupported or overconfident advice and requests one bounded revision.", runtime: "LangGraph · Mesh" },
   { id: "verifier", icon: "✓", title: "Financial verifier", detail: "Rejects unknown amounts, evidence, currencies and prohibited certainty in plain code.", runtime: "Fail-closed · no LLM" },
-  { id: "audit", icon: "≡", title: "Audit ledger", detail: "Persists every transition, model ID, latency, tokens, rejected draft and final decision.", runtime: "PostgreSQL · immutable lineage" }
+  { id: "audit", icon: "≡", title: "Audit ledger", detail: "Persists every transition, model ID, latency, tokens, rejected draft and final decision.", runtime: "PostgreSQL · immutable lineage" },
+  { id: "digest", icon: "◴", title: "Digest dispatcher", detail: "Claims due weekly work once and records an idempotent in-app delivery.", runtime: "Signed Vercel Cron · SQL lock" }
 ];
 
 function minorFromRupees(value: string): number {
@@ -84,6 +87,8 @@ export function ProductConsole() {
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [agentRun, setAgentRun] = useState<AgentRun | null>(null);
   const [governance, setGovernance] = useState<GovernanceData | null>(null);
+  const [digestPreference, setDigestPreference] = useState<DigestPreference | null>(null);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [visibleEvents, setVisibleEvents] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -119,7 +124,20 @@ export function ProductConsole() {
     setAccounts(nextAccounts); setTransactions(page.items);
     const known = page.items.find((item) => item.balance_minor !== null);
     if (known) setAsOf(known.transaction_date);
-    await loadGovernance(activeToken, activeTenant.id);
+    await Promise.all([
+      loadGovernance(activeToken, activeTenant.id),
+      loadDigests(activeToken, activeTenant.id)
+    ]);
+  }
+
+  async function loadDigests(activeToken = token, activeTenant = tenant?.id) {
+    if (!activeToken || !activeTenant) return;
+    const [preferenceResponse, notificationResponse] = await Promise.all([
+      api("/api/v1/digests/preference", {}, activeToken, activeTenant),
+      api("/api/v1/digests/notifications", {}, activeToken, activeTenant)
+    ]);
+    setDigestPreference((await preferenceResponse.json()) as DigestPreference | null);
+    setNotifications((await notificationResponse.json()) as Notification[]);
   }
 
   async function loadGovernance(activeToken = token, activeTenant = tenant?.id) {
@@ -223,6 +241,18 @@ export function ProductConsole() {
     finally { setBusy(false); }
   }
 
+  async function saveDigestPreference(enabled: boolean) {
+    setBusy(true); setError("");
+    try {
+      await api("/api/v1/digests/preference", {
+        method: "PUT",
+        body: JSON.stringify({ enabled, weekday: 0, local_time: "09:00", timezone: "Asia/Kolkata" })
+      });
+      await loadDigests(); setView("digests");
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not update digest schedule"); }
+    finally { setBusy(false); }
+  }
+
   useEffect(() => {
     if (!agentRun || visibleEvents <= 0 || visibleEvents >= agentRun.events.length) return;
     const timer = window.setTimeout(() => setVisibleEvents((count) => count + 1), 650);
@@ -252,12 +282,13 @@ export function ProductConsole() {
     {mode === "system" ? <SystemMap agentRun={agentRun} visibleEvents={visibleEvents} setVisibleEvents={setVisibleEvents} /> : !token || !tenant ? <main className="fp-auth-layout"><section><p className="fp-kicker">NEURO-SYMBOLIC FINANCIAL DECISION INTELLIGENCE</p><h1>See the math.<br />Watch the agents.<br /><span>Trust the evidence.</span></h1><p>Import a real statement, branch a what-if scenario, and inspect every deterministic calculation and Mesh-powered handoff.</p><div className="fp-trust-row"><span>Exact money math</span><span>Tenant isolation</span><span>Fail-closed advice</span></div></section><form className="fp-auth-panel" onSubmit={authenticate}><div className="fp-auth-toggle"><button type="button" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Sign in</button><button type="button" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Register</button></div><h2>{authMode === "login" ? "Continue to your household" : "Create a private household"}</h2>{authMode === "register" && <label>Household name<input name="household" required /></label>}<label>Email<input name="email" type="email" required /></label><label>Password<input name="password" type="password" minLength={12} required /></label><button className="fp-primary" disabled={busy}>{busy ? "Authenticating…" : authMode === "login" ? "Open workspace" : "Create household"}</button>{error && <p className="fp-error">{error}</p>}<small>Short-lived access tokens stay in memory. Financial data is never sent to the browser without tenant authorization.</small></form></main> : <main className="fp-workspace">
       <aside className="fp-sidebar"><div className="fp-household"><div><span>{tenant.name.slice(0, 2).toUpperCase()}</span><div><b>{tenant.name}</b><small>{tenant.role} · private workspace</small></div></div><p>{transactions.length ? `${transactions.length} verified ledger rows` : "Ready for your first statement"}</p></div><div className="fp-ring-card"><div className="fp-ring" style={{ "--rate": `${metrics.rate * 3.6}deg` } as CSSProperties}><b>{metrics.rate}%</b></div><dl><div><dt>Income</dt><dd>{money(metrics.income)}</dd></div><div><dt>Spend</dt><dd>{money(metrics.spend)}</dd></div><div><dt>Net</dt><dd className={metrics.savings >= 0 ? "positive" : "negative"}>{money(metrics.savings)}</dd></div></dl></div>{!accounts.length ? <button className="fp-upload" onClick={createAccount} disabled={busy}><span>＋</span><b>Create primary account</b><small>No balance will be invented</small></button> : <label className="fp-upload"><span>⇧</span><b>{uploadFileName || "Upload transactions"}</b><small>{uploadSummary || "CSV · explicit bank mapping"}</small><input ref={fileRef} type="file" accept=".csv,text/csv" onChange={uploadStatement} /></label>}<button className="fp-run" onClick={runFinPilot} disabled={busy || !transactions.length}>{busy ? "Running secure pipeline…" : "▷ Run FinPilot"}</button><div className="fp-controls"><label>Balance date<input type="date" value={asOf} onChange={(event) => setAsOf(event.target.value)} /></label><label>Horizon<select value={horizon} onChange={(event) => setHorizon(Number(event.target.value))}><option value={30}>30 days</option><option value={60}>60 days</option><option value={90}>90 days</option></select></label><label>Purchase date<input type="date" value={scenarioDate} onChange={(event) => setScenarioDate(event.target.value)} /></label><label>Purchase amount (₹)<input value={scenarioAmount} onChange={(event) => setScenarioAmount(event.target.value)} inputMode="decimal" /></label></div><div className="fp-stage-list">{stages.map(([id, label]) => <div key={id} className={completed.has(id) ? "done" : ""}><span>{completed.has(id) ? "✓" : "○"}</span>{label}</div>)}</div></aside>
 
-      <section className="fp-main"><nav className="fp-tabs">{(["overview", "ledger", "forecast", "advice", "audit", "governance"] as View[]).map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}</nav><div className="fp-pipeline">{stages.slice(1).map(([id, label], index) => <div key={id} className={completed.has(id) ? "done" : ""}><i>{index + 1}</i><span>{label}</span>{index < stages.length - 2 && <b>›</b>}</div>)}</div>{error && <p className="fp-error fp-wide-error">{error}</p>}
+      <section className="fp-main"><nav className="fp-tabs">{(["overview", "ledger", "forecast", "advice", "audit", "digests", "governance"] as View[]).map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}</nav><div className="fp-pipeline">{stages.slice(1).map(([id, label], index) => <div key={id} className={completed.has(id) ? "done" : ""}><i>{index + 1}</i><span>{label}</span>{index < stages.length - 2 && <b>›</b>}</div>)}</div>{error && <p className="fp-error fp-wide-error">{error}</p>}
         {view === "overview" && <Overview metrics={metrics} snapshot={snapshot} transactions={transactions} />}
         {view === "ledger" && <Ledger transactions={transactions} />}
         {view === "forecast" && <ForecastView snapshot={snapshot} forecast={forecast} scenario={scenario} />}
         {view === "advice" && <AdviceView run={agentRun} question={question} setQuestion={setQuestion} visibleEvents={visibleEvents} />}
         {view === "audit" && <AuditView run={agentRun} />}
+        {view === "digests" && <DigestView preference={digestPreference} notifications={notifications} busy={busy} savePreference={saveDigestPreference} />}
         {view === "governance" && <GovernanceView data={governance} busy={busy} createDemo={createGovernanceDemo} rejectReview={rejectReview} />}
       </section>
 
@@ -289,6 +320,10 @@ function AuditView({ run }: { run: AgentRun | null }) {
   return <div className="fp-panel fp-timeline"><header><div><span className="fp-kicker">IMMUTABLE DECISION TRAIL</span><h2>Execution {run.id.slice(0, 8)}</h2></div><small>{run.verification_status}</small></header>{run.events.map((event) => <article key={event.id}><i>{event.sequence}</i><div><span>{event.event_type}</span><h3>{event.node}</h3><p>{event.summary}</p></div><aside>{event.model_id ? <><b>{event.model_id}</b><small>{event.input_tokens ?? 0} in · {event.output_tokens ?? 0} out</small><small>{event.latency_ms ?? 0} ms</small></> : <><b>Deterministic</b><small>No model call</small></>}</aside></article>)}</div>;
 }
 
+function DigestView({ preference, notifications, busy, savePreference }: { preference: DigestPreference | null; notifications: Notification[]; busy: boolean; savePreference: (enabled: boolean) => Promise<void> }) {
+  return <div className="fp-content"><div className="fp-summary-grid"><article><span>Weekly digest</span><strong className={preference?.enabled ? "positive" : ""}>{preference?.enabled ? "ACTIVE" : "OFF"}</strong><small>Persisted schedule state</small></article><article><span>Delivery channel</span><strong>IN-APP</strong><small>Guaranteed base adapter</small></article><article><span>Delivered</span><strong>{notifications.length}</strong><small>Deduplicated notifications</small></article><article><span>Next eligibility</span><strong>{preference?.next_due_at ? new Date(preference.next_due_at).toLocaleDateString() : "Not set"}</strong><small>Daily cron · weekly eligibility</small></article></div><article className="fp-panel"><header><div><span className="fp-kicker">DURABLE PROACTIVE INSIGHTS</span><h2>Monday financial check-in</h2></div><button className="fp-mini-button" disabled={busy} onClick={() => savePreference(!preference?.enabled)}>{preference?.enabled ? "Disable" : "Enable Monday 09:00"}</button></header><p className="fp-empty">{preference ? `${preference.local_time} · ${preference.timezone} · next ${new Date(preference.next_due_at).toLocaleString()}` : "Enable a weekly digest. Schedule state is stored in PostgreSQL and claimed by a signed, idempotent dispatcher."}</p></article><article className="fp-panel"><header><div><span className="fp-kicker">DELIVERY AUDIT</span><h2>In-app notifications</h2></div><small>No email or Telegram configured</small></header>{notifications.length ? <div className="fp-review-list">{notifications.map((item) => <article key={item.id}><header><span>{item.status}</span><small>{new Date(item.delivered_at ?? item.created_at).toLocaleString()}</small></header><b>{item.subject}</b><p>{item.body}</p><small>Job {item.digest_job_id.slice(0, 8)} · one delivery per schedule key</small></article>)}</div> : <p className="fp-empty">No digest has been delivered yet. The production cron trigger evaluates due preferences once per day.</p>}</article></div>;
+}
+
 function GovernanceView({ data, busy, createDemo, rejectReview }: { data: GovernanceData | null; busy: boolean; createDemo: () => Promise<void>; rejectReview: (id: string) => Promise<void> }) {
   if (!data) return <div className="fp-empty-stage"><span>⌾</span><h2>Loading governance evidence</h2><p>FinPilot is resolving approved assets, risk controls and review lineage.</p></div>;
   const pending = data.reviews.filter((item) => item.status === "pending");
@@ -297,5 +332,5 @@ function GovernanceView({ data, busy, createDemo, rejectReview }: { data: Govern
 
 function SystemMap({ agentRun, visibleEvents, setVisibleEvents }: { agentRun: AgentRun | null; visibleEvents: number; setVisibleEvents: (value: number | ((count: number) => number)) => void }) {
   const activeNode = agentRun?.events[Math.max(visibleEvents - 1, 0)]?.node;
-  return <main className="fp-system"><section className="fp-system-intro"><p className="fp-kicker">INSPECTABLE BY DESIGN</p><h1>How FinPilot turns a statement into verified advice.</h1><p>Every green path below exists in the application. Mesh handles semantics; deterministic code owns money, authorization and release decisions.</p></section><section className="fp-graph"><div className="fp-flow-line" />{architecture.map((node, index) => <article key={node.id} className={(activeNode?.includes(node.id) || (node.id === "analyst" && activeNode === "behavior_analyst") || (node.id === "advisor" && ["financial_advisor", "revision"].includes(activeNode ?? "")) || (node.id === "verifier" && activeNode === "verification")) ? "active" : ""}><i>{index + 1}</i><span>{node.icon}</span><h3>{node.title}</h3><p>{node.detail}</p><small>{node.runtime}</small></article>)}</section><section className="fp-trace-player"><header><div><b>Trace player</b><span>{agentRun ? `${visibleEvents}/${agentRun.events.length} persisted events` : "Run the live workspace to record a trace"}</span></div><div><button onClick={() => setVisibleEvents((count) => Math.max(0, count - 1))} disabled={!agentRun || visibleEvents === 0}>‹ Prev</button><button className="active" onClick={() => setVisibleEvents((count) => agentRun ? Math.min(agentRun.events.length, count + 1) : 0)} disabled={!agentRun || visibleEvents >= agentRun.events.length}>Next ›</button><button onClick={() => setVisibleEvents(0)} disabled={!agentRun}>↻ Reset</button></div></header>{agentRun && visibleEvents > 0 && <div className="fp-trace-detail"><span>{agentRun.events[visibleEvents - 1].node}</span><strong>{agentRun.events[visibleEvents - 1].summary}</strong><small>{agentRun.events[visibleEvents - 1].model_id ? `Mesh · ${agentRun.events[visibleEvents - 1].model_id}` : "Deterministic control"}</small></div>}</section><section className="fp-stack"><article><span>LANGGRAPH</span><b>Typed conditional workflow</b><small>One bounded revision loop</small></article><article><span>FASTAPI</span><b>Authenticated API boundary</b><small>Tenant derived server-side</small></article><article><span>POSTGRESQL</span><b>Versioned financial truth</b><small>Immutable evidence lineage</small></article><article><span>MESH API</span><b>Only model gateway</b><small>Model, tokens and latency logged</small></article><article><span>NEXT.JS</span><b>Operational console</b><small>No fabricated live values</small></article></section><section className="fp-judge-grid"><header><p className="fp-kicker">CONTROL SURFACE</p><h2>What the implementation proves</h2></header>{["Real CSV truth and idempotency", "Exact recurrence and anomaly evidence", "Chronological forecast backtesting", "Immutable what-if branches", "Distinct Mesh-powered specialists", "Critic and bounded correction loop", "Independent financial verification", "Tenant-scoped audit and lineage"].map((item, index) => <article key={item}><i>{String(index + 1).padStart(2, "0")}</i><span>✓</span><b>{item}</b></article>)}</section></main>;
+  return <main className="fp-system"><section className="fp-system-intro"><p className="fp-kicker">INSPECTABLE BY DESIGN</p><h1>How FinPilot turns a statement into verified advice.</h1><p>Every green path below exists in the application. Mesh handles semantics; deterministic code owns money, authorization and release decisions.</p></section><section className="fp-graph"><div className="fp-flow-line" />{architecture.map((node, index) => <article key={node.id} className={(activeNode?.includes(node.id) || (node.id === "analyst" && activeNode === "behavior_analyst") || (node.id === "advisor" && ["financial_advisor", "revision"].includes(activeNode ?? "")) || (node.id === "verifier" && activeNode === "verification")) ? "active" : ""}><i>{index + 1}</i><span>{node.icon}</span><h3>{node.title}</h3><p>{node.detail}</p><small>{node.runtime}</small></article>)}</section><section className="fp-trace-player"><header><div><b>Trace player</b><span>{agentRun ? `${visibleEvents}/${agentRun.events.length} persisted events` : "Run the live workspace to record a trace"}</span></div><div><button onClick={() => setVisibleEvents((count) => Math.max(0, count - 1))} disabled={!agentRun || visibleEvents === 0}>‹ Prev</button><button className="active" onClick={() => setVisibleEvents((count) => agentRun ? Math.min(agentRun.events.length, count + 1) : 0)} disabled={!agentRun || visibleEvents >= agentRun.events.length}>Next ›</button><button onClick={() => setVisibleEvents(0)} disabled={!agentRun}>↻ Reset</button></div></header>{agentRun && visibleEvents > 0 && <div className="fp-trace-detail"><span>{agentRun.events[visibleEvents - 1].node}</span><strong>{agentRun.events[visibleEvents - 1].summary}</strong><small>{agentRun.events[visibleEvents - 1].model_id ? `Mesh · ${agentRun.events[visibleEvents - 1].model_id}` : "Deterministic control"}</small></div>}</section><section className="fp-stack"><article><span>LANGGRAPH</span><b>Typed conditional workflow</b><small>One bounded revision loop</small></article><article><span>FASTAPI</span><b>Authenticated API boundary</b><small>Tenant derived server-side</small></article><article><span>POSTGRESQL</span><b>Versioned financial truth</b><small>Immutable evidence lineage</small></article><article><span>MESH API</span><b>Only model gateway</b><small>Model, tokens and latency logged</small></article><article><span>NEXT.JS</span><b>Operational console</b><small>No fabricated live values</small></article></section><section className="fp-judge-grid"><header><p className="fp-kicker">CONTROL SURFACE</p><h2>What the implementation proves</h2></header>{["Real CSV truth and idempotency", "Exact recurrence and anomaly evidence", "Chronological forecast backtesting", "Immutable what-if branches", "Distinct Mesh-powered specialists", "Critic and bounded correction loop", "Independent financial verification", "Tenant-scoped audit and lineage", "Durable idempotent digest delivery"].map((item, index) => <article key={item}><i>{String(index + 1).padStart(2, "0")}</i><span>✓</span><b>{item}</b></article>)}</section></main>;
 }

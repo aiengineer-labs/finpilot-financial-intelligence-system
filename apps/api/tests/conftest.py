@@ -3,6 +3,7 @@ import os
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("SESSION_SECRET", "test-only-secret-with-at-least-thirty-two-chars")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./.test-finpilot.db")
+os.environ.setdefault("CRON_SECRET", "test-cron-secret-with-at-least-thirty-two-chars")
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient

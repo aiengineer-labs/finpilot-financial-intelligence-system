@@ -93,6 +93,17 @@ class EvaluationGateStatus(StrEnum):
     NOT_RUN = "not_run"
 
 
+class DigestJobStatus(StrEnum):
+    CLAIMED = "claimed"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+
+
+class NotificationStatus(StrEnum):
+    DELIVERED = "delivered"
+    FAILED = "failed"
+
+
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
 
@@ -513,3 +524,74 @@ class HumanDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     reason: Mapped[str] = mapped_column(Text)
     source_evidence: Mapped[list[str]] = mapped_column(JSON)
     artifact_lineage: Mapped[dict[str, str]] = mapped_column(JSON)
+
+
+class DigestPreference(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "digest_preferences"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_id"),
+        Index("ix_digest_preferences_due", "enabled", "next_due_at"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    weekday: Mapped[int] = mapped_column(Integer)
+    local_time: Mapped[str] = mapped_column(String(5))
+    timezone: Mapped[str] = mapped_column(String(64))
+    next_due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_dispatched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class DigestJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "digest_jobs"
+    __table_args__ = (
+        UniqueConstraint("job_key"),
+        Index("ix_digest_jobs_tenant_created", "tenant_id", "created_at"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    preference_id: Mapped[UUID] = mapped_column(
+        ForeignKey("digest_preferences.id", ondelete="CASCADE")
+    )
+    job_key: Mapped[str] = mapped_column(String(180))
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[DigestJobStatus] = mapped_column(Enum(DigestJobStatus))
+    claimed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=1)
+    snapshot_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("calculation_snapshots.id", ondelete="RESTRICT"), nullable=True
+    )
+    forecast_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("forecasts.id", ondelete="RESTRICT"), nullable=True
+    )
+    insight_kind: Mapped[str] = mapped_column(String(60))
+    insight_amount_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
+    subject: Mapped[str] = mapped_column(String(180))
+    body: Mapped[str] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class InAppNotification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "in_app_notifications"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "dedupe_key"),
+        Index("ix_notifications_user_created", "tenant_id", "user_id", "created_at"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    digest_job_id: Mapped[UUID] = mapped_column(ForeignKey("digest_jobs.id", ondelete="CASCADE"))
+    dedupe_key: Mapped[str] = mapped_column(String(180))
+    channel: Mapped[str] = mapped_column(String(30), default="in_app")
+    status: Mapped[NotificationStatus] = mapped_column(Enum(NotificationStatus))
+    subject: Mapped[str] = mapped_column(String(180))
+    body: Mapped[str] = mapped_column(Text)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)

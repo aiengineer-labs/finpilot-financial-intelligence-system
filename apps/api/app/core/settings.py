@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     mesh_base_url: AnyHttpUrl = AnyHttpUrl("https://api.meshapi.ai/v1")
     mesh_model: str = ""
     mesh_timeout_seconds: float = Field(default=20, gt=0, le=60)
+    cron_secret: SecretStr | None = None
+    digest_dispatch_limit: int = Field(default=25, ge=1, le=100)
 
     @field_validator("mesh_base_url")
     @classmethod
@@ -32,6 +34,15 @@ class Settings(BaseSettings):
     def reject_example_secret(cls, value: SecretStr) -> SecretStr:
         if value.get_secret_value() in {"change-me", "secret", "changeme"}:
             raise ValueError("SESSION_SECRET must not use an example value")
+        return value
+
+    @field_validator("cron_secret", mode="before")
+    @classmethod
+    def validate_cron_secret(cls, value: object) -> object:
+        if value is None or value == "":
+            return None
+        if not isinstance(value, str) or len(value) < 32:
+            raise ValueError("CRON_SECRET must contain at least 32 characters")
         return value
 
 

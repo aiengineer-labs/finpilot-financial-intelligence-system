@@ -19,7 +19,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 - **Phase 5 — IN_PROGRESS:** the main route is now a production-style responsive operations console with authentication, account creation, CSV upload, live ledger metrics, snapshot/forecast/scenario execution, advice, audit views, persisted event replay, and a browser-visible “How it works” system map. Signed-out, authenticated, and architecture modes were visually verified in Chrome; full browser automation of an external-inference run remains pending the same Mesh egress approval.
 - **Phase 6 — IMPLEMENTED / LIVE RED-TEAM PENDING:** deterministic prompt-injection normalization covers Unicode/full-width confusables, zero-width controls, HTML entities, double URL encoding, and Base64 payloads. NeMo Guardrails 0.24.1 input/output rails and Presidio pattern-based minimization are wired into the live agent path; guardrail/privacy events are persisted and NeMo performs no direct inference. Promptfoo 0.124.1 schema validation passes for an offline PR lane and a Mesh-only model-based lane. The offline lane measures 168 attack variants and 16 legitimate controls: 0/168 missed attacks and 0/16 false positives. Bandit, Gitleaks, pip-audit, and application-layer container high/critical gates pass. The full image retains one unresolved upstream Trixie zlib high CVE. The authorized model-based red team is not run because Mesh egress approval is pending. These are bounded results, not an immunity claim.
 - **Phase 6b — IMPLEMENTED:** PostgreSQL-backed version/hash registry, exact execution and recommendation lineage, 13-risk register, evaluation promotion gates, independent human-review decisions, tenant-scoped APIs, synthetic rejected-advice demonstration, and the live governance dashboard are implemented. Runtime uses approved artifacts only; draft policy changes cannot silently take effect. Dedicated incident records and durable drift observations remain explicit follow-on work.
-- **Phase 7 — NOT_STARTED:** durable digest scheduling and performance profiling.
+- **Phase 7 — IMPLEMENTED / HOSTED CRON EVIDENCE PENDING:** persisted timezone-aware weekly preferences, concurrency-safe SQL claiming, unique schedule and delivery keys, signed daily Vercel Cron configuration, deterministic data-backed insights, in-app notification audit, tenant-scoped APIs, and a live Digests console are implemented. Local PostgreSQL dispatch delivered once and an immediate replay claimed zero jobs. Hosted Vercel Cron evidence and broader latency/cost profiling remain pending.
 - **Phase 8 — NOT_STARTED:** reproducibility, documentation, evaluation, Vercel readiness/deployment evidence, official workflow.
 
 ## Verification log
@@ -76,6 +76,10 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 | 2026-10-16 | Phase 6b frontend gates | PASS: ESLint with zero warnings, strict TypeScript, and Next production build |
 | 2026-10-16 | PostgreSQL governance migration | PASS: Alembic head `20261016_0005`; five governance tables verified; API and web healthy |
 | 2026-10-16 | Chrome governance-console smoke | PASS: running Docker UI visibly rendered 10 versioned assets, 13 risks, blocked release gate, evaluation evidence, and review queue |
+| 2026-10-16 | PostgreSQL digest migration | PASS: Docker rebuild healthy; Alembic head `20261016_0006`; durable preference, job, and notification tables applied |
+| 2026-10-16 | signed local digest dispatch | PASS: one due synthetic preference produced one delivered job/notification; immediate authenticated replay claimed 0 and delivered 0 |
+| 2026-10-16 | Chrome digest-console smoke | PASS after catching and fixing missing CORS `PUT`: schedule persisted as Monday 09:00 Asia/Kolkata and the delivered notification/job key rendered in the live UI |
+| 2026-10-16 | Phase 7 full quality gates | PASS: Ruff; strict mypy over 52 modules; 219 pytest tests at 81% coverage; ESLint; strict TypeScript; Next production build; `vercel.json` JSON validation; `git diff --check` |
 
 ## External blockers
 
@@ -86,4 +90,4 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 
 ## Next executable step
 
-Implement Phase 7 durable weekly digests and alerts with concurrency-safe, idempotent dispatch plus delivery audit and performance profiling. After explicit Mesh egress approval, run and record the live specialist workflow and Promptfoo model-based red team. The unresolved base-image CVE and Vercel bundle/runtime measurement remain release-readiness work.
+Proceed with Phase 8 reproducibility and Vercel build-readiness verification: complete remaining architecture/security/API/demo docs, measure the API deployment bundle/runtime, run the full quality/security suite, and validate official workflow inputs without claiming hosted deployment. After explicit Mesh egress approval, run and record the live specialist workflow and Promptfoo model-based red team.
