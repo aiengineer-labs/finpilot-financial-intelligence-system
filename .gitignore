@@ -151,6 +151,8 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -207,6 +209,23 @@ tempCodeRunnerFile.py
 
 # Ruff stuff:
 .ruff_cache/
+
+# FinPilot frontend, tooling, credentials, and private data
+node_modules/
+.next/
+.vercel/
+.pnpm-store/
+.cache/
+.DS_Store
+uploads/
+private-data/
+*.csv
+!evaluation/datasets/*.csv
+*.dump
+*.sql
+.test-*.db
+*.db
+*.tsbuildinfo
 
 # PyPI configuration file
 .pypirc

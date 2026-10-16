@@ -1,0 +1,36 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-and-secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.13"
+      - run: uv sync --project apps/api --frozen --python 3.12
+      - run: uv run --project apps/api ruff check --select S apps/api/app apps/api/tests
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  policy-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.13"
+      - run: uv sync --project apps/api --frozen --python 3.12
+      - run: cd apps/api && uv run pytest -q tests/security tests/integration/test_auth_tenant_isolation.py
