@@ -4,7 +4,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 
 ## Environment
 
-- Repository: `feat/phase-1-foundation`; Phase 1 commit `0fa8e5d`, Phase 2 commit `4621a87`, Phase 3 engine checkpoint `cf19fe6`, and Phase 3 persistence/UI commit `59042a7`, based on `origin/main` at `1a3f50e`.
+- Repository: `feat/phase-1-foundation`; latest pushed checkpoint `2fd705c`, based on `origin/main` at `1a3f50e`. Earlier verified milestones: `0fa8e5d`, `4621a87`, `cf19fe6`, `59042a7`, and `f6c1a5b`.
 - Available: Python 3.14.7, uv 0.7.13, Node 22.15.0, Corepack 0.32.0, Docker CLI 29.8.2, Compose 5.6.0, Git 2.55.0.
 - Installed/project-managed: Python 3.12.11 virtualenv (`apps/api/.venv`), locked backend dependencies, Corepack pnpm 10.18.3, locked frontend dependencies, Docker daemon 29.8.2.
 - Missing globally: standalone `psql` and `vercel` (PostgreSQL validation uses the pinned container CLI). Docker Desktop was started for integration verification.
@@ -17,7 +17,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 - **Phase 3 — VERIFIED:** recurrence, robust anomaly detection, chronological backtesting, immutable calculation snapshots, persisted 30/60/90 daily forecasts/points, tenant-scoped APIs, scenario branches, and the browser forecast studio are implemented and tested against PostgreSQL.
 - **Phase 4 — IMPLEMENTED / LIVE VERIFICATION PENDING:** real typed LangGraph workflow, separate behavior analyst/advisor/critic agents through the Mesh-only adapter, bounded correction routing, independent deterministic financial verifier, fail-closed release, persisted execution events/recommendations/verifications, tenant-safe APIs, and PostgreSQL audit lineage. Static, unit, integration, and database gates pass; the final live inference smoke is pending explicit approval to transmit synthetic forecast context to Mesh.
 - **Phase 5 — IN_PROGRESS:** the main route is now a production-style responsive operations console with authentication, account creation, CSV upload, live ledger metrics, snapshot/forecast/scenario execution, advice, audit views, persisted event replay, and a browser-visible “How it works” system map. Signed-out, authenticated, and architecture modes were visually verified in Chrome; full browser automation of an external-inference run remains pending the same Mesh egress approval.
-- **Phase 6 — IN_PROGRESS:** deterministic prompt-injection normalization now covers Unicode/full-width confusables, zero-width controls, HTML entities, double URL encoding, and base64 payloads. A versioned pytest matrix contains 168 attack variants and 16 legitimate financial controls; the measured local result is 0/168 missed attacks and 0/16 false positives. This is a bounded regression result, not an immunity claim. NeMo, Presidio, Promptfoo, SAST, secret, and container-depth gates remain.
+- **Phase 6 — IN_PROGRESS:** deterministic prompt-injection normalization covers Unicode/full-width confusables, zero-width controls, HTML entities, double URL encoding, and base64 payloads. NeMo Guardrails 0.24.1 input/output rails and Presidio pattern-based minimization are wired into the live agent path; guardrail/privacy events are persisted and NeMo performs no direct inference. A versioned pytest matrix contains 168 attack variants and 16 legitimate financial controls; the measured local result is 0/168 missed attacks and 0/16 false positives. This is a bounded regression result, not an immunity claim. Promptfoo, SAST, secret, and container-depth gates remain.
 - **Phase 6b — NOT_STARTED:** governance versions, lineage, approvals, risk controls, and UI.
 - **Phase 7 — NOT_STARTED:** durable digest scheduling and performance profiling.
 - **Phase 8 — NOT_STARTED:** reproducibility, documentation, evaluation, Vercel readiness/deployment evidence, official workflow.
@@ -62,6 +62,13 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 | 2026-10-16 | Mesh model discovery | PASS: authenticated Mesh model catalog includes configured `openai/gpt-5.4-mini`; local ignored `.env` updated without exposing or committing the credential |
 | 2026-10-16 | Live Mesh financial-context smoke | BLOCKED BY REQUIRED APPROVAL: environment refused external transmission of forecast/scenario-derived context; no bypass attempted and no deployment/inference success claimed |
 | 2026-10-16 | Phase 6 deterministic injection regression | PASS: 168 encoded/wrapped attack variants blocked; 16 legitimate financial phrases allowed; full backend suite 207 tests, 81% line coverage |
+| 2026-10-16 | NeMo/Presidio live-path gates | PASS: Ruff, strict mypy over 46 modules, 212 tests, 82% coverage; input/output blocking, PII masking, numeric preservation, audit events, and Mesh-output interception covered |
+| 2026-10-16 | updated Python dependency audit | PASS after upgrading transitive `cryptography` 48.0.1 to patched 50.0.2; `pip-audit` reports no known vulnerabilities |
+| 2026-10-16 | guardrail performance/size observation | OBSERVED: local cold `ModelGuardrails` initialization 2.22s; development site-packages 403 MB; final Trixie API image 1,060,542,032 logical bytes (Docker Scout artifact size 226 MB). This requires explicit Vercel bundle measurement and potentially Large Functions/Fluid compute before deployment claims. |
+| 2026-10-16 | Docker guardrail smoke | PASS: rebuilt PostgreSQL/API/web stack healthy; NeMo input rail initialized and passed inside the non-root API container without a model/network call |
+| 2026-10-16 | Bandit SAST | PASS after replacing three runtime `assert` statements with explicit error handling; zero remaining findings over 3,163 application lines |
+| 2026-10-16 | Gitleaks v8.29.1 committed-history scan | PASS: nine commits / approximately 771 KB scanned; no leaks found; ignored local `.env` was not treated as repository content |
+| 2026-10-16 | Docker Scout high/critical gate | PARTIAL: application-introduced packages 0 critical/0 high; full Trixie image 0 critical/1 high from unfixed Debian zlib CVE-2026-85091. Public release remains blocked pending an upstream fix or documented risk acceptance. |
 
 ## External blockers
 
@@ -72,4 +79,4 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 
 ## Next executable step
 
-After explicit Mesh egress approval, run and record the live specialist workflow through the authenticated API and browser console. Continue Phase 6 with a compatible NeMo Guardrails execution boundary, targeted Presidio minimization, Promptfoo/Mesh configuration, and SAST/secrets/container scanning with measured reports.
+After explicit Mesh egress approval, run and record the live specialist workflow through the authenticated API and browser console. Continue Phase 6 with Promptfoo/Mesh configuration plus SAST, secrets and container scanning with measured reports; then validate the Python function bundle against Vercel's current Large Functions path.

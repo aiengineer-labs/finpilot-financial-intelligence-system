@@ -7,7 +7,7 @@ COPY app ./app
 COPY alembic alembic
 COPY alembic.ini ./
 
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.12-slim-trixie AS runtime
 ENV PATH=/app/.venv/bin:$PATH PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 RUN addgroup --system --gid 1001 finpilot && adduser --system --uid 1001 --ingroup finpilot finpilot

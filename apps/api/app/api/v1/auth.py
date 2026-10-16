@@ -73,7 +73,8 @@ async def me(
         .options(selectinload(User.memberships).selectinload(Membership.tenant))
         .where(User.id == user.id)
     )
-    assert loaded is not None
+    if loaded is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid session")
     return UserResponse(
         id=loaded.id,
         email=loaded.email,

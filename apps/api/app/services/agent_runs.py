@@ -26,6 +26,7 @@ from app.graphs.advice import (
     VERIFIER_VERSION,
     AdviceWorkflow,
 )
+from app.guardrails.service import GuardrailViolation, get_model_guardrails
 from app.integrations.mesh import MeshClient
 from app.security.input_policy import InputDecision, assess_untrusted_text
 
@@ -155,6 +156,11 @@ async def execute_advice(
         session, tenant_id=tenant_id, forecast_id=forecast_id, scenario_id=scenario_id
     )
     settings = get_settings()
+    guardrails = get_model_guardrails()
+    try:
+        prepared = await guardrails.prepare_input(question, context)
+    except GuardrailViolation as exc:
+        raise ValueError("question was blocked by programmable guardrails") from exc
     execution = AgentExecution(
         tenant_id=tenant_id,
         requested_by_user_id=user_id,
@@ -178,8 +184,12 @@ async def execute_advice(
     await session.commit()
     await session.refresh(execution)
     try:
-        state = await AdviceWorkflow(mesh or MeshClient(settings)).run(
-            question=question, context=context
+        state = await AdviceWorkflow(
+            mesh or MeshClient(settings, output_guard=guardrails)
+        ).run(
+            question=prepared.question,
+            context=prepared.context,
+            guardrail_events=prepared.events,
         )
     except Exception as exc:
         execution.status = AgentRunStatus.FAILED

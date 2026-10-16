@@ -41,11 +41,14 @@ def _usage(result: MeshResult) -> tuple[int, int]:
 
 def _mesh_event(node: str, summary: str, result: MeshResult) -> dict[str, Any]:
     input_tokens, output_tokens = _usage(result)
+    details: dict[str, Any] = {"gateway": "Mesh API", "model": result.completion.model}
+    if result.guardrails is not None:
+        details["guardrails"] = result.guardrails
     return {
         "node": node,
         "event_type": "mesh_completion",
         "summary": summary,
-        "details": {"gateway": "Mesh API", "model": result.completion.model},
+        "details": details,
         "model_id": result.completion.model,
         "latency_ms": result.latency_ms,
         "input_tokens": input_tokens,
@@ -120,7 +123,13 @@ class AdviceWorkflow:
         builder.add_edge("revision", "verification")
         self.graph = builder.compile()
 
-    async def run(self, *, question: str, context: dict[str, Any]) -> AdviceState:
+    async def run(
+        self,
+        *,
+        question: str,
+        context: dict[str, Any],
+        guardrail_events: list[dict[str, Any]] | None = None,
+    ) -> AdviceState:
         initial: AdviceState = {
             "question": question,
             "context": context,
@@ -131,7 +140,7 @@ class AdviceWorkflow:
             "verification_status": VerificationStatus.INSUFFICIENT_DATA.value,
             "verification_reasons": [],
             "revision_attempts": 0,
-            "events": [],
+            "events": list(guardrail_events or []),
             "final_response": "",
         }
         return cast(AdviceState, await self.graph.ainvoke(initial))

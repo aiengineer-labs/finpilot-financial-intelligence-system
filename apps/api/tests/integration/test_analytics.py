@@ -180,6 +180,8 @@ async def test_versioned_forecast_and_immutable_scenario_are_tenant_scoped(
     assert own_run.status_code == 200, own_run.text
     assert own_run.json()["verification_status"] == "accept"
     assert [event["node"] for event in own_run.json()["events"]] == [
+        "nemo_input",
+        "presidio_minimization",
         "supervisor",
         "behavior_analyst",
         "financial_advisor",

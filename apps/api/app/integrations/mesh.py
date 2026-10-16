@@ -26,10 +26,15 @@ class MeshCompletion(BaseModel):
 class MeshResult:
     completion: MeshCompletion
     latency_ms: int
+    guardrails: dict[str, str] | None = None
 
 
 class MeshTransport(Protocol):
     async def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class MeshOutputGuard(Protocol):
+    async def process_output(self, text: str) -> str: ...
 
 
 class HttpMeshTransport:
@@ -51,11 +56,17 @@ class HttpMeshTransport:
 class MeshClient:
     """The sole application boundary for all model inference."""
 
-    def __init__(self, settings: Settings, transport: MeshTransport | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        transport: MeshTransport | None = None,
+        output_guard: MeshOutputGuard | None = None,
+    ) -> None:
         if not settings.mesh_model:
             raise RuntimeError("MESH_MODEL must be configured before model inference")
         self._settings = settings
         self._transport = transport or HttpMeshTransport(settings)
+        self._output_guard = output_guard
 
     async def complete(self, messages: list[MeshMessage], *, max_tokens: int = 800) -> MeshResult:
         started = time.monotonic()
@@ -67,4 +78,18 @@ class MeshClient:
         }
         raw = await self._transport.post("/chat/completions", payload)
         completion = MeshCompletion.model_validate(raw)
-        return MeshResult(completion, int((time.monotonic() - started) * 1000))
+        guardrail_metadata: dict[str, str] | None = None
+        if self._output_guard is not None:
+            for choice in completion.choices:
+                message = choice.get("message")
+                if not isinstance(message, dict):
+                    continue
+                content = message.get("content")
+                if isinstance(content, str):
+                    message["content"] = await self._output_guard.process_output(content)
+            guardrail_metadata = {"output": "passed", "stack": "NeMo Guardrails + Presidio"}
+        return MeshResult(
+            completion,
+            int((time.monotonic() - started) * 1000),
+            guardrail_metadata,
+        )

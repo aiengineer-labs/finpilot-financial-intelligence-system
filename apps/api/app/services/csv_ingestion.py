@@ -113,9 +113,11 @@ def _money_to_minor(raw: str, *, field: str, allow_blank: bool = False) -> int |
 def _signed_amount(row: dict[str, str], mapping: CSVColumnMapping) -> int:
     if mapping.signed_amount:
         value = _money_to_minor(row.get(mapping.signed_amount, ""), field="amount")
-        assert value is not None
+        if value is None:
+            raise ValueError("amount is required")
         return value
-    assert mapping.debit and mapping.credit
+    if not mapping.debit or not mapping.credit:
+        raise ValueError("debit and credit mappings are required")
     debit = _money_to_minor(row.get(mapping.debit, ""), field="debit", allow_blank=True)
     credit = _money_to_minor(row.get(mapping.credit, ""), field="credit", allow_blank=True)
     if debit is not None and credit is not None:
