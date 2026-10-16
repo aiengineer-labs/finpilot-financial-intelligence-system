@@ -39,7 +39,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 | 2026-10-16 | organizer workflow retrieval/review | PASS: downloaded from specified HTTPS endpoint; OIDC-scoped job uses only stdlib check runner and required secrets; committed unchanged |
 | 2026-10-16 | `git diff --check` | PASS |
 | 2026-10-16 | Phase 1 local commit | PASS: `0fa8e5d feat: establish secure FinPilot foundation` |
-| 2026-10-16 | `git push -u origin feat/phase-1-foundation` | BLOCKED: GitHub identity `mlbala` lacks permission to `aiengineer-labs/finpilot-financial-intelligence-system` |
+| 2026-10-16 | `git push -u origin feat/phase-1-foundation` | PASS: pushed branch and established upstream via the `github-python` SSH profile authenticated as `aiengineer-labs` |
 | 2026-10-16 | Phase 2 Ruff + strict mypy + pytest coverage | PASS: 32 application modules, 12 tests, 83% line coverage |
 | 2026-10-16 | PostgreSQL migration | PASS: Docker applied `20261016_0002`; migration container exited 0 |
 | 2026-10-16 | golden CSV Docker smoke | PASS: 7 source rows → 5 accepted, 1 malformed, 1 duplicate; replay returned same upload, ledger stayed at 5; transfer excluded; one unknown balance preserved as null |
@@ -56,8 +56,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 - Live Mesh tests require `MESH_API_KEY` and a verified organizer-supported model.
 - Vercel deployment requires authenticated Vercel access and managed PostgreSQL credentials.
 - Official submission checks require GitHub secrets `MESH_API_KEY` and `SUBMISSION_TOKEN`.
-- Official GitHub workflow execution requires a pushed commit and repository secrets; local presence is not CI success.
-- Remote milestone pushes are blocked until the authorized GitHub identity/remote permissions are corrected.
+- Official GitHub workflow execution still requires repository secrets and observed workflow results; a successful branch push is not CI success.
 
 ## Next executable step
 
