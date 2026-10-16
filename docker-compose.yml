@@ -1,0 +1,68 @@
+name: finpilot
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: finpilot
+      POSTGRES_USER: finpilot
+      POSTGRES_PASSWORD: finpilot-local-only
+    ports:
+      - "5432:5432"
+    volumes:
+      - finpilot-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finpilot -d finpilot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ./apps/api
+    command: ["alembic", "upgrade", "head"]
+    environment: &api-env
+      DATABASE_URL: postgresql+asyncpg://finpilot:finpilot-local-only@postgres:5432/finpilot
+      SESSION_SECRET: local-compose-secret-change-before-any-shared-deployment
+      ALLOWED_ORIGINS: '["http://localhost:3000"]'
+      MESH_API_KEY: ${MESH_API_KEY:-}
+      MESH_MODEL: ${MESH_MODEL:-}
+      CRON_SECRET: ${CRON_SECRET:-}
+      DIGEST_DISPATCH_LIMIT: ${DIGEST_DISPATCH_LIMIT:-25}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ./apps/api
+    environment: *api-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  finpilot-postgres:

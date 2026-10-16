@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.13"
+          enable-cache: true
+      - run: uv sync --project apps/api --frozen --python 3.12
+      - run: uv run --project apps/api ruff check apps/api/app apps/api/tests
+      - run: cd apps/api && uv run mypy app
+      - run: cd apps/api && uv run pytest -q --cov=app
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm --dir apps/web install --frozen-lockfile
+      - run: pnpm --dir apps/web lint
+      - run: pnpm --dir apps/web typecheck
+      - run: pnpm --dir apps/web build
+
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
+
+  evaluation-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Promptfoo configurations
+        run: >-
+          docker run --rm
+          -v "$PWD:/workspace"
+          -w /workspace/evaluation/promptfoo
+          ghcr.io/promptfoo/promptfoo:0.124.1
+          promptfoo validate config
+          -c promptfooconfig.quick.yaml
+          -c promptfooconfig.redteam.yaml
+      - name: Run offline security regression
+        run: >-
+          docker run --rm
+          -v "$PWD:/workspace"
+          -w /workspace/evaluation/promptfoo
+          -e PROMPTFOO_PYTHON=python3
+          -e PROMPTFOO_DISABLE_TELEMETRY=true
+          ghcr.io/promptfoo/promptfoo:0.124.1
+          promptfoo eval -c promptfooconfig.quick.yaml --no-cache

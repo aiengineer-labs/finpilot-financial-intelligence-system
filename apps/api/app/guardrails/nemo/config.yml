@@ -1,0 +1,31 @@
+colang_version: "1.0"
+import_paths:
+  - nemoguardrails/library/regex
+
+passthrough: true
+
+rails:
+  input:
+    flows:
+      - regex check input
+  output:
+    flows:
+      - regex check output
+  retrieval:
+    flows:
+      - regex check retrieval
+  config:
+    regex_detection:
+      input:
+        patterns:
+          - '(?is)\b(ignore|override|disable|bypass|forget|discard)\b.{0,80}\b(policy|instructions?|verification|guardrails?|rules?|system)\b'
+          - '(?is)\b(reveal|print|show|leak|exfiltrate|return)\b.{0,80}\b(api[-_ ]?key|secret|system\s+prompt|credentials?|all\s+accounts?)\b'
+          - '(?is)\b(execute|run)\b.{0,40}\b(shell|sql|python|command)\b'
+      output:
+        patterns:
+          - '(?i)\b(sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,})\b'
+          - '(?is)\b(system prompt|api[-_ ]?key|private credential)\b.{0,80}\b(is|equals|:)\b'
+          - '(?i)\b(guaranteed|certain return|risk-free profit)\b'
+      retrieval:
+        patterns:
+          - '(?is)\b(ignore|override|disable|bypass)\b.{0,80}\b(instructions?|policy|verification|system)\b'
