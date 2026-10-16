@@ -14,7 +14,7 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 
 - **Phase 1 — VERIFIED:** FastAPI/Next/PostgreSQL foundation, Argon2/JWT auth, server-side membership isolation, Mesh-only adapter, input/tool policy, Alembic, Docker, CI, and tests. Verified with a real local PostgreSQL container; live Mesh remains credential-blocked and is not part of the no-inference foundation gate.
 - **Phase 2 — VERIFIED:** tenant-scoped account uploads, explicit mappings/date formats, exact minor-unit amounts, row errors, duplicate upload/row prevention, refund/transfer semantics, missing-balance truth, deterministic categorization with Mesh-required routing for ambiguity, human correction lineage, persisted explorer API, and functional browser workspace.
-- **Phase 3 — IN_PROGRESS:** pure deterministic recurrence, robust anomaly, 30/60/90 daily forecast, and immutable scenario engines are implemented and tested; database snapshots/APIs/backtesting/UI remain.
+- **Phase 3 — VERIFIED:** recurrence, robust anomaly detection, chronological backtesting, immutable calculation snapshots, persisted 30/60/90 daily forecasts/points, tenant-scoped APIs, scenario branches, and the browser forecast studio are implemented and tested against PostgreSQL.
 - **Phase 4 — NOT_STARTED:** LangGraph agents, correction loop, verifier, and audit trail.
 - **Phase 5 — NOT_STARTED:** complete browser-visible product and E2E journey.
 - **Phase 6 — NOT_STARTED:** NeMo/Presidio hardening and 100+ case red-team evaluation.
@@ -50,6 +50,11 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 | 2026-10-16 | Phase 2 local commit | PASS: `4621a87 feat: add idempotent transaction ingestion` |
 | 2026-10-16 | Phase 3 engine checks | PASS: Ruff, strict mypy over 33 application modules, 17 pytest/Hypothesis tests, 82% line coverage |
 | 2026-10-16 | Phase 3 engine checkpoint | PASS: `cf19fe6 feat: add deterministic financial engines` |
+| 2026-10-16 | Phase 3 static/unit/integration gates | PASS: Ruff; strict mypy over 36 application modules; 19 pytest/Hypothesis tests; 79% line coverage |
+| 2026-10-16 | Phase 3 frontend gates | PASS: ESLint, strict TypeScript, Next production build; `/forecast` generated |
+| 2026-10-16 | PostgreSQL analytics migration | PASS: Docker rebuild completed; Alembic head `20261016_0003`; six analytics tables verified |
+| 2026-10-16 | live analytics API smoke | PASS: persisted snapshot/30-day forecast and ₹75,000 laptop scenario; scenario minimum ₹5,500, no projected shortfall |
+| 2026-10-16 | Chrome forecast studio smoke | PASS: authenticated synthetic tenant rendered source evidence, baseline curve, scenario curve, assumptions, and shortfall result from live API records |
 
 ## External blockers
 
@@ -60,4 +65,4 @@ Last updated: 2026-10-16 (Asia/Kolkata)
 
 ## Next executable step
 
-Persist versioned calculation snapshots, recurring patterns, forecasts/points, and scenario runs; expose tenant-scoped creation/retrieval APIs; add chronological backtesting fixtures; then connect a forecast/scenario studio to those real records.
+Implement Phase 4 as a real LangGraph workflow with typed state, distinct Mesh-only specialist prompts, bounded critic/revision routing, deterministic financial verification, persisted agent executions/events and recommendation lineage; expose live-run/audit APIs and redesign the product shell with live and “How it works” modes backed only by verified capabilities.

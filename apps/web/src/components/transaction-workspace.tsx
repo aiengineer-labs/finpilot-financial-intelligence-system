@@ -178,7 +178,7 @@ export function TransactionWorkspace() {
     <main className="workspace-shell">
       <header className="workspace-header">
         <div><Link className="back-link" href="/">← FinPilot</Link><h1>Transaction truth</h1></div>
-        <span className="badge online">{tenant.name}</span>
+        <div className="header-actions"><Link className="secondary nav-button" href="/forecast">Forecast studio →</Link><span className="badge online">{tenant.name}</span></div>
       </header>
 
       {!accounts.length ? (

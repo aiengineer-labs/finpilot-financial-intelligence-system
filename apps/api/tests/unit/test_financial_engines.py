@@ -8,6 +8,7 @@ from app.engines.financial import (
     EngineTransaction,
     ScenarioShock,
     build_forecast,
+    chronological_backtest,
     detect_anomalies,
     detect_recurrence,
     run_scenario,
@@ -22,8 +23,9 @@ def _transaction(
     category: str = "general",
     kind: TransactionKind = TransactionKind.EXPENSE,
     excluded: bool = False,
+    balance: int | None = None,
 ) -> EngineTransaction:
-    return EngineTransaction(identity, day, amount, merchant, category, kind, excluded)
+    return EngineTransaction(identity, day, amount, merchant, category, kind, excluded, balance)
 
 
 def test_monthly_recurrence_and_transfer_exclusion() -> None:
@@ -106,3 +108,30 @@ def test_purchase_scenario_reports_shortfall_without_mutating_baseline() -> None
     assert baseline.points is original
     assert result.first_shortfall_date == date(2026, 10, 10)
     assert result.ending_delta_minor == -150_000
+
+
+def test_chronological_backtest_uses_only_pre_cutoff_history() -> None:
+    transactions = [
+        _transaction(
+            "salary-jul", date(2026, 7, 1), 100_000, "acme", "income",
+            TransactionKind.INCOME, balance=100_000,
+        ),
+        _transaction(
+            "salary-aug", date(2026, 8, 1), 100_000, "acme", "income",
+            TransactionKind.INCOME, balance=200_000,
+        ),
+        _transaction(
+            "salary-sep", date(2026, 9, 1), 100_000, "acme", "income",
+            TransactionKind.INCOME, balance=300_000,
+        ),
+        _transaction(
+            "salary-oct", date(2026, 10, 1), 100_000, "acme", "income",
+            TransactionKind.INCOME, balance=400_000,
+        ),
+    ]
+    result = chronological_backtest(
+        transactions, cutoffs=[date(2026, 9, 1)], horizon_days=30
+    )
+    assert result.folds[0].observations == 1
+    assert result.forecast_mae_minor == 0
+    assert result.naive_mae_minor == 100_000

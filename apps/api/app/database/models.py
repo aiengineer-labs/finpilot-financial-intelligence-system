@@ -166,3 +166,106 @@ class ClassificationCorrection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     new_category: Mapped[str] = mapped_column(String(80))
     reason: Mapped[str] = mapped_column(String(500))
     transaction: Mapped[Transaction] = relationship(back_populates="corrections")
+
+
+class CalculationSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Immutable, tenant-scoped input manifest for deterministic analytics."""
+
+    __tablename__ = "calculation_snapshots"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "input_sha256", "engine_version"),
+        Index("ix_calculation_snapshots_tenant_created", "tenant_id", "created_at"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("financial_accounts.id", ondelete="CASCADE")
+    )
+    as_of: Mapped[date] = mapped_column(Date)
+    currency: Mapped[str] = mapped_column(String(3))
+    opening_balance_minor: Mapped[int] = mapped_column(BigInteger)
+    source_transaction_count: Mapped[int] = mapped_column(Integer)
+    source_transaction_ids: Mapped[list[str]] = mapped_column(JSON)
+    input_sha256: Mapped[str] = mapped_column(String(64))
+    engine_version: Mapped[str] = mapped_column(String(40))
+    anomaly_results: Mapped[list[dict[str, str | int]]] = mapped_column(JSON, default=list)
+
+
+class StoredRecurringPattern(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "recurring_patterns"
+    __table_args__ = (Index("ix_recurring_patterns_tenant_snapshot", "tenant_id", "snapshot_id"),)
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    snapshot_id: Mapped[UUID] = mapped_column(
+        ForeignKey("calculation_snapshots.id", ondelete="CASCADE")
+    )
+    merchant: Mapped[str] = mapped_column(String(255))
+    cadence: Mapped[str] = mapped_column(String(20))
+    period_days: Mapped[int] = mapped_column(Integer)
+    typical_amount_minor: Mapped[int] = mapped_column(BigInteger)
+    confidence_bps: Mapped[int] = mapped_column(Integer)
+    last_observed: Mapped[date] = mapped_column(Date)
+    supporting_transaction_ids: Mapped[list[str]] = mapped_column(JSON)
+    explanation: Mapped[str] = mapped_column(Text)
+
+
+class StoredForecast(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "forecasts"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "snapshot_id", "horizon_days", "engine_version"),
+        Index("ix_forecasts_tenant_created", "tenant_id", "created_at"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    snapshot_id: Mapped[UUID] = mapped_column(
+        ForeignKey("calculation_snapshots.id", ondelete="RESTRICT")
+    )
+    horizon_days: Mapped[int] = mapped_column(Integer)
+    opening_balance_minor: Mapped[int] = mapped_column(BigInteger)
+    minimum_balance_minor: Mapped[int] = mapped_column(BigInteger)
+    assumptions: Mapped[list[str]] = mapped_column(JSON)
+    engine_version: Mapped[str] = mapped_column(String(40))
+
+
+class StoredForecastPoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "forecast_points"
+    __table_args__ = (
+        UniqueConstraint("forecast_id", "day"),
+        Index("ix_forecast_points_forecast_day", "forecast_id", "day"),
+    )
+
+    forecast_id: Mapped[UUID] = mapped_column(ForeignKey("forecasts.id", ondelete="CASCADE"))
+    day: Mapped[date] = mapped_column(Date)
+    balance_minor: Mapped[int] = mapped_column(BigInteger)
+    recurring_flow_minor: Mapped[int] = mapped_column(BigInteger)
+    estimated_variable_spend_minor: Mapped[int] = mapped_column(BigInteger)
+
+
+class ScenarioRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "scenario_runs"
+    __table_args__ = (Index("ix_scenario_runs_tenant_created", "tenant_id", "created_at"),)
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    forecast_id: Mapped[UUID] = mapped_column(ForeignKey("forecasts.id", ondelete="RESTRICT"))
+    name: Mapped[str] = mapped_column(String(120))
+    shocks: Mapped[list[dict[str, str | int]]] = mapped_column(JSON)
+    minimum_balance_minor: Mapped[int] = mapped_column(BigInteger)
+    first_shortfall_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ending_delta_minor: Mapped[int] = mapped_column(BigInteger)
+    engine_version: Mapped[str] = mapped_column(String(40))
+
+
+class ScenarioPoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "scenario_points"
+    __table_args__ = (
+        UniqueConstraint("scenario_run_id", "day"),
+        Index("ix_scenario_points_run_day", "scenario_run_id", "day"),
+    )
+
+    scenario_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scenario_runs.id", ondelete="CASCADE")
+    )
+    day: Mapped[date] = mapped_column(Date)
+    balance_minor: Mapped[int] = mapped_column(BigInteger)
+    recurring_flow_minor: Mapped[int] = mapped_column(BigInteger)
+    estimated_variable_spend_minor: Mapped[int] = mapped_column(BigInteger)

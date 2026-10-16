@@ -10,7 +10,7 @@ export default async function Home() {
         <a className="brand" href="#top" aria-label="FinPilot home">
           <span>FP</span> FinPilot
         </a>
-        <span className="phase">Foundation · Phase 1</span>
+        <span className="phase">Numerical engine · Phase 3</span>
       </nav>
 
       <section className="hero" id="top">
@@ -23,6 +23,7 @@ export default async function Home() {
           </p>
           <div className="actions">
             <a className="primary" href="/transactions">Open workspace</a>
+            <a className="secondary" href="/forecast">Forecast studio</a>
             <a className="secondary" href="http://localhost:8000/docs">API contract</a>
           </div>
         </div>
@@ -54,8 +55,8 @@ export default async function Home() {
           <StatusCard label="Money actions" value="Disabled" tone="good" />
         </div>
         <p className="empty-state">
-          This is an honest foundation state. Upload, forecasting, scenarios, and agent views will
-          appear only when their real backend slices are implemented and verified.
+          Transaction import, deterministic forecasts, and immutable scenarios are connected to
+          persisted records. Agent recommendations remain unavailable until their audited flow is verified.
         </p>
       </section>
     </main>

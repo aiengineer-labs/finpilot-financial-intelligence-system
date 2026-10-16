@@ -17,6 +17,7 @@ class EngineTransaction:
     category: str
     kind: TransactionKind
     is_excluded_from_cashflow: bool = False
+    balance_minor: int | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,22 @@ class ScenarioResult:
     minimum_balance_minor: int
     first_shortfall_date: date | None
     ending_delta_minor: int
+
+
+@dataclass(frozen=True)
+class BacktestFold:
+    cutoff: date
+    horizon_days: int
+    observations: int
+    forecast_mae_minor: int
+    naive_mae_minor: int
+
+
+@dataclass(frozen=True)
+class BacktestResult:
+    folds: tuple[BacktestFold, ...]
+    forecast_mae_minor: int
+    naive_mae_minor: int
 
 
 def _median_int(values: list[int]) -> int:
@@ -280,4 +297,55 @@ def run_scenario(baseline: Forecast, shocks: list[ScenarioShock]) -> ScenarioRes
         minimum_balance_minor=minimum,
         first_shortfall_date=first_shortfall,
         ending_delta_minor=cumulative_delta,
+    )
+
+
+def chronological_backtest(
+    transactions: list[EngineTransaction], *, cutoffs: list[date], horizon_days: int
+) -> BacktestResult:
+    """Evaluate only future observed balances using history available at each cutoff."""
+    if not cutoffs:
+        raise ValueError("at least one chronological cutoff is required")
+    folds: list[BacktestFold] = []
+    for cutoff in sorted(cutoffs):
+        training = [item for item in transactions if item.transaction_date <= cutoff]
+        latest = max(training, key=lambda item: (item.transaction_date, item.id), default=None)
+        if latest is None or latest.balance_minor is None:
+            raise ValueError(f"known balance required at cutoff {cutoff.isoformat()}")
+        forecast = build_forecast(
+            as_of=cutoff,
+            horizon_days=horizon_days,
+            opening_balance_minor=latest.balance_minor,
+            transactions=training,
+        )
+        predicted = {point.day: point.balance_minor for point in forecast.points}
+        end = cutoff + timedelta(days=horizon_days)
+        observations = [
+            item
+            for item in transactions
+            if cutoff < item.transaction_date <= end and item.balance_minor is not None
+        ]
+        if not observations:
+            raise ValueError(f"future balance observations required after {cutoff.isoformat()}")
+        forecast_errors = [
+            abs(predicted[item.transaction_date] - item.balance_minor)  # type: ignore[operator]
+            for item in observations
+        ]
+        naive_errors = [
+            abs(latest.balance_minor - item.balance_minor)  # type: ignore[operator]
+            for item in observations
+        ]
+        folds.append(
+            BacktestFold(
+                cutoff=cutoff,
+                horizon_days=horizon_days,
+                observations=len(observations),
+                forecast_mae_minor=sum(forecast_errors) // len(forecast_errors),
+                naive_mae_minor=sum(naive_errors) // len(naive_errors),
+            )
+        )
+    return BacktestResult(
+        folds=tuple(folds),
+        forecast_mae_minor=sum(fold.forecast_mae_minor for fold in folds) // len(folds),
+        naive_mae_minor=sum(fold.naive_mae_minor for fold in folds) // len(folds),
     )
