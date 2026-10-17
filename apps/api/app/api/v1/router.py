@@ -5,6 +5,7 @@ from app.api.v1 import (
     agents,
     analytics,
     auth,
+    categorization,
     digests,
     governance,
     system,
@@ -17,6 +18,7 @@ api_router.include_router(auth.router)
 api_router.include_router(workspace.router)
 api_router.include_router(accounts.router)
 api_router.include_router(transactions.router)
+api_router.include_router(categorization.router)
 api_router.include_router(analytics.router)
 api_router.include_router(agents.router)
 api_router.include_router(governance.router)

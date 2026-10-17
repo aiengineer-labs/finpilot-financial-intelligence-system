@@ -2,6 +2,7 @@
 
 | Component | Permitted | Forbidden |
 |---|---|---|
+| Categorizer | Propose one category per bounded label from a fixed list; call Mesh adapter | Amounts, balances, kinds, transfers/refunds, overriding human corrections, applying its own output |
 | Supervisor | Route within the bounded graph | Database, network, credentials, tool expansion |
 | Behavior analyst | Read minimized deterministic context; call Mesh adapter | Arithmetic authority, writes, arbitrary tools |
 | Financial advisor | Draft typed recommendations from supplied evidence | Money movement, invented evidence, policy changes |

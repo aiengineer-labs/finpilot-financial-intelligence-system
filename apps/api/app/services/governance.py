@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.specialists import CATEGORIZER_PROMPT_VERSION, MAX_CATEGORIZER_LABELS
 from app.core.settings import Settings
 from app.database.models import (
     EvaluationGateStatus,
@@ -24,6 +25,7 @@ from app.database.models import (
     RiskRegisterEntry,
     TenantRole,
 )
+from app.engines.categorization import MIN_SEMANTIC_CONFIDENCE_BPS, SEMANTIC_CONFIDENCE_CAP_BPS
 from app.graphs.manifest import GRAPH_VERSION, PROMPT_VERSION, VERIFIER_VERSION
 from app.guardrails.service import NEMO_POLICY_VERSION, PII_POLICY_VERSION
 
@@ -78,6 +80,20 @@ def _artifact_specs(settings: Settings) -> tuple[tuple[str, str, str, dict[str, 
             "transaction-rules",
             "categorization-rules-v2",
             {"low_confidence_route": "mesh_required", "human_correction_lineage": True},
+        ),
+        (
+            "categorizer_prompt",
+            "mesh-categorizer",
+            CATEGORIZER_PROMPT_VERSION,
+            {
+                "template_version": CATEGORIZER_PROMPT_VERSION,
+                "fixed_categories": True,
+                "min_confidence_bps": MIN_SEMANTIC_CONFIDENCE_BPS,
+                "confidence_cap_bps": SEMANTIC_CONFIDENCE_CAP_BPS,
+                "max_labels_per_run": MAX_CATEGORIZER_LABELS,
+                "amounts_sent": False,
+                "human_corrections_overridable": False,
+            },
         ),
         (
             "tool_policy",
@@ -181,7 +197,7 @@ RISK_SPECS: tuple[tuple[str, str, RiskLevel, RiskLevel, str, str, str, RiskLevel
         RiskLevel.MEDIUM,
         RiskLevel.MEDIUM,
         "Ambiguous merchant semantics",
-        "Confidence, Mesh-required routing and correction lineage",
+        "Rules first; confidence-gated Mesh categorizer over a fixed list; correction lineage",
         "Data Owner",
         RiskLevel.MEDIUM,
     ),

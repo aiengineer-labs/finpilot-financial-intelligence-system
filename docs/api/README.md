@@ -5,6 +5,7 @@ Local OpenAPI is available at `http://localhost:8000/docs`.
 - `/health`, `/ready`: liveness and database readiness.
 - `/api/v1/auth/*`: register, login, current memberships.
 - Accounts and transaction routes: content-validated CSV/PDF uploads, parser/source provenance, listing, and corrections. Upload failures use stable codes such as `FILE_TYPE_MISMATCH`, `MALFORMED_PDF`, `PDF_ENCRYPTED`, and `PDF_OCR_REQUIRED`.
+- `POST /api/v1/accounts/{account_id}/categorization-runs`: sends the account's `mesh_required` rows to the Mesh categorizer. Only rows that no earlier run has answered are sent, as up to 40 bounded, screened labels. Code then applies the answers that pass its checks. The route returns `not_needed` without a model call when nothing is pending. It returns 503 when Mesh is not configured and 502 when the provider or a guardrail fails; both failures leave rows unchanged.
 - `/api/v1/analytics/*`: immutable snapshots, forecasts, and scenarios.
 - `/api/v1/agent-runs`: bounded Mesh workflow and persisted audit retrieval.
 - `/api/v1/governance/*`: assets, risks, evaluations, reviews, and decisions.

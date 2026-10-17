@@ -17,6 +17,12 @@ export type UploadResult = {
   parser_version: string; extraction_method: string; page_count: number | null; warnings: string[];
   processing_duration_ms: number; statement_kind: AccountType;
 };
+/** One Mesh pass over rows the rules could not place; `not_needed` means no model call was made. */
+export type CategorizationRun = {
+  id: string | null; account_id: string; status: "not_needed" | "completed"; prompt_version: string;
+  model_id: string | null; rows_pending: number; labels_sent: number; labels_withheld: number;
+  rows_updated: number; rows_remaining: number; latency_ms: number; input_tokens: number; output_tokens: number;
+};
 export type Pattern = {
   id: string; merchant: string; cadence: string; typical_amount_minor: number;
   confidence_bps: number; explanation?: string;

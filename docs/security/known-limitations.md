@@ -1,6 +1,7 @@
 # Known limitations
 
-- Live Mesh specialist execution and the model-based Promptfoo red team require explicit approval to transmit synthetic context; neither is reported as completed.
+- Live Mesh advice and categorization runs have been exercised on synthetic data only. The model-based Promptfoo red team has not been run and remains a release blocker.
+- The Mesh categorizer's accuracy (macro F1, confusion matrix) has not been measured on an independent labelled holdout set. Its confidence gate and fixed category list limit wrong labels without measuring them. Mesh proposals below 7000 bps stay `mesh_required` for human review.
 - No Vercel deployment has been executed. Function bundle size, cold start, managed-database connectivity, CORS, and production Cron remain unverified on the target account.
 - The current API container includes one upstream Debian zlib high-severity finding without a fixed package; application-added packages have no high/critical findings in the recorded scan.
 - Dedicated incident records, durable drift observations, user export/delete workflows, and jurisdiction-specific privacy/legal review are not implemented.

@@ -21,17 +21,19 @@ import { ApiError, DEFAULT_MAPPING, SAMPLE_STATEMENT, type Session, request } fr
 import { addDays, compactMoney, humanize, minorFromRupees } from "@/lib/format";
 import { deriveInsights } from "@/lib/insights";
 import type {
-  Account, AccountType, AgentRun, ArchitectureManifest, DigestPreference, EvaluationRun, Forecast, GovernanceArtifact, GovernanceData,
+  Account, AccountType, AgentRun, ArchitectureManifest, CategorizationRun, DigestPreference, EvaluationRun, Forecast, GovernanceArtifact, GovernanceData,
   GovernanceRisk, GovernanceSummary, HumanReview, Notification, Scenario, Snapshot, Tenant, Transaction,
   UploadResult, View
 } from "@/lib/types";
 
-type Busy = null | "demo" | "account" | "upload" | "analysis" | "advisor" | "governance" | "digest" | "correction";
+type Busy = null | "demo" | "account" | "upload" | "categorize" | "analysis" | "advisor" | "governance" | "digest" | "correction";
 type ActiveSession = { token: string; tenant: Tenant };
 type ProductMode = "demo" | "console" | "system";
 
 const LEDGER_PAGE = 200;
 const LEDGER_CAP = 1000;
+// Each pass sends at most 40 distinct labels; three passes cover large statements.
+const CATEGORIZE_PASSES = 3;
 const CARD_QUESTION = "Where can I reduce my credit-card spending?";
 const BANK_QUESTION = "How can I reduce my spending and save more money each month?";
 const SPENDING_QUESTION = "Where can I reduce my spending?";
@@ -115,6 +117,7 @@ export function ProductConsole() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [transactionTotal, setTransactionTotal] = useState(0);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
+  const [categorization, setCategorization] = useState<CategorizationRun | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [scenario, setScenario] = useState<Scenario | null>(null);
@@ -250,6 +253,7 @@ export function ProductConsole() {
     if (!auth || accountId === activeAccount?.id) return;
     setBusy("account");
     try {
+      setCategorization(null);
       setSnapshot(null);
       setForecast(null);
       setScenario(null);
@@ -294,6 +298,7 @@ export function ProductConsole() {
         result = await uploadStatement(auth, account.id, statement);
       }
       setUploadResult(result);
+      setCategorization(null);
       setSnapshot(null);
       setForecast(null);
       setScenario(null);
@@ -325,6 +330,44 @@ export function ProductConsole() {
     } catch (caught) {
       push({ tone: "error", title: "Correction failed", body: message(caught, "Could not save the correction") });
       return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /* ---------- semantic categorization ---------- */
+
+  /**
+   * Sends only rows the rules could not place to the Mesh categorizer. A failure is reported
+   * but never blocks analysis: those rows keep their rule-based category.
+   */
+  async function categorizeUnclear(): Promise<void> {
+    if (!auth || !activeAccount || !transactions.length) return;
+    setBusy("categorize");
+    try {
+      let first: CategorizationRun | null = null;
+      let last: CategorizationRun | null = null;
+      let updated = 0;
+      let latency = 0;
+      for (let pass = 0; pass < CATEGORIZE_PASSES; pass += 1) {
+        last = await request<CategorizationRun>(`/api/v1/accounts/${activeAccount.id}/categorization-runs`, { method: "POST", body: "{}" }, auth);
+        first ??= last;
+        updated += last.rows_updated;
+        latency += last.latency_ms;
+        if (last.status === "not_needed" || last.rows_remaining === 0) break;
+      }
+      setCategorization(last);
+      if (updated) {
+        const ledger = await fetchLedger(auth, activeAccount.id);
+        setTransactions(ledger.items);
+        setTransactionTotal(ledger.total);
+      }
+      if (first?.status === "completed") {
+        const kept = first.rows_pending - updated;
+        push({ tone: "info", title: `Mesh categorized ${updated} ${updated === 1 ? "row" : "rows"}`, body: `${kept} unclear ${kept === 1 ? "row stays" : "rows stay"} for your review · ${(latency / 1000).toFixed(1)} s` });
+      }
+    } catch (caught) {
+      push({ tone: "error", title: "Categorization skipped", body: `${message(caught, "Mesh could not label the unclear rows")}. Rule-based categories were used.` });
     } finally {
       setBusy(null);
     }
@@ -426,6 +469,7 @@ export function ProductConsole() {
   }
 
   async function runPipeline() {
+    if (!categorization || categorization.rows_remaining > 0) await categorizeUnclear();
     const result = await runAnalysis();
     if (result) await askAdvisor(result);
   }
@@ -526,7 +570,9 @@ export function ProductConsole() {
   }
 
   const completed = new Set<StageId>();
-  if (transactions.length) { completed.add("import"); completed.add("categorize"); }
+  if (transactions.length) completed.add("import");
+  // Rules label most rows; the stage is done once no row is waiting for the Mesh categorizer.
+  if (transactions.length && (insights.needsReview === 0 || categorization?.rows_remaining === 0)) completed.add("categorize");
   if (snapshot) completed.add("analyze");
   // A card statement's forecast is its projected 30-day spend.
   if (forecast || snapshot?.analysis_mode === "spending") completed.add("forecast");
@@ -539,13 +585,14 @@ export function ProductConsole() {
       ? { label: "How it works", subtitle: "Architecture, agents and trace replay" }
       : VIEWS.find((item) => item.id === view) ?? VIEWS[0];
   const working = busy !== null;
-  const activity: Activity = busy === "upload" || busy === "analysis" || busy === "advisor" ? busy : null;
+  const activity: Activity = busy === "upload" || busy === "categorize" || busy === "analysis" || busy === "advisor" ? busy : null;
   const spendingOnly = isSpendingOnly(activeAccount, transactions);
   const canAnalyse = Boolean(activeAccount && transactions.length && config.asOf);
 
   const commands: Command[] = [
     ...VIEWS.map((item) => ({ id: `view-${item.id}`, label: item.label, group: "Go to", icon: item.icon, run: () => navigate(item.id) })),
     { id: "sample", label: "Use fictional demo CSV", group: "Actions", icon: "flask", disabled: working, run: () => void importFile("sample") },
+    { id: "categorize", label: "Categorize unclear rows with Mesh", group: "Actions", icon: "filter", disabled: working || !insights.needsReview, run: () => void categorizeUnclear() },
     { id: "analysis", label: "Run deterministic analysis", group: "Actions", icon: "play", disabled: working || !canAnalyse, run: () => { navigate("forecast"); void runAnalysis(); } },
     { id: "advisor", label: "Ask the verified advisor", group: "Actions", icon: "advice", disabled: working || (!forecast && !snapshot), run: () => void askAdvisor() },
     { id: "inspector", label: inspectorOpen ? "Hide agent log" : "Show agent log", group: "Actions", icon: "terminal", run: () => setInspectorOpen((open) => !open) },
@@ -586,7 +633,7 @@ export function ProductConsole() {
           <button className={`icon-btn ${inspectorOpen ? "active" : ""}`} onClick={() => setInspectorOpen((open) => !open)} aria-label="Toggle agent log" aria-pressed={inspectorOpen}><Icon name="terminal" size={17} />{agentRun && <span className="badge-dot" />}</button>
           <button className="btn btn-ai run-btn" onClick={runPipeline} disabled={working || !canAnalyse} title={spendingOnly ? "Deterministic spending analysis, then the Mesh-powered advisor graph" : "Deterministic analysis, then the Mesh-powered advisor graph"}>
             <Icon name={working ? "refresh" : "advice"} size={14} className={working ? "spin" : ""} />
-            <span>{busy === "analysis" ? "Analysing…" : busy === "advisor" ? "Agents working…" : "Run FinPilot"}</span>
+            <span>{busy === "categorize" ? "Categorizing…" : busy === "analysis" ? "Analysing…" : busy === "advisor" ? "Agents working…" : "Run FinPilot"}</span>
           </button>
         </header>
 

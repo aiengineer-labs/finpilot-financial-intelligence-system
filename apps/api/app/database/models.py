@@ -52,6 +52,7 @@ class ClassificationMethod(StrEnum):
     RULE = "rule"
     MESH_REQUIRED = "mesh_required"
     HUMAN = "human"
+    MESH = "mesh"
 
 
 class AgentRunStatus(StrEnum):
@@ -246,6 +247,48 @@ class ClassificationCorrection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     new_category: Mapped[str] = mapped_column(String(80))
     reason: Mapped[str] = mapped_column(String(500))
     transaction: Mapped[Transaction] = relationship(back_populates="corrections")
+
+
+class CategorizationRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """One bounded Mesh call that labels rows the deterministic rules could not place."""
+
+    __tablename__ = "categorization_runs"
+    __table_args__ = (Index("ix_categorization_runs_tenant_created", "tenant_id", "created_at"),)
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("financial_accounts.id", ondelete="CASCADE")
+    )
+    requested_by_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    status: Mapped[AgentRunStatus] = mapped_column(Enum(AgentRunStatus))
+    prompt_version: Mapped[str] = mapped_column(String(40))
+    model_id: Mapped[str] = mapped_column(String(120))
+    rows_pending: Mapped[int] = mapped_column(Integer, default=0)
+    labels_sent: Mapped[int] = mapped_column(Integer, default=0)
+    labels_withheld: Mapped[int] = mapped_column(Integer, default=0)
+    rows_updated: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    artifact_lineage: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+
+
+class CategorizationDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """What the categorizer answered for one row, and whether code applied it."""
+
+    __tablename__ = "categorization_decisions"
+    __table_args__ = (Index("ix_categorization_decisions_tenant_run", "tenant_id", "run_id"),)
+
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("categorization_runs.id", ondelete="CASCADE"))
+    transaction_id: Mapped[UUID] = mapped_column(ForeignKey("transactions.id", ondelete="CASCADE"))
+    label_id: Mapped[str] = mapped_column(String(20))
+    previous_category: Mapped[str] = mapped_column(String(80))
+    proposed_category: Mapped[str] = mapped_column(String(80))
+    confidence_bps: Mapped[int] = mapped_column(Integer)
+    applied: Mapped[bool] = mapped_column(Boolean)
+    reason: Mapped[str] = mapped_column(String(40))
 
 
 class CalculationSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):

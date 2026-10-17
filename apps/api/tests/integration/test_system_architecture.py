@@ -20,6 +20,7 @@ async def test_architecture_manifest_requires_an_isolated_workspace(client: Asyn
     assert payload["graph_version"] == "advice-graph-v2"
     assert {node["id"] for node in payload["nodes"]} >= {
         "upload",
+        "semantic_categorizer",
         "supervisor",
         "behavior_analyst",
         "financial_advisor",
