@@ -11,7 +11,7 @@
 
 Do not use real financial data in a public demo. Do not describe fake test transport as live Mesh, and do not claim Vercel success until production URLs, migrations, health, cron, and tenant isolation are observed.
 
-PDF support is deliberately narrow and deterministic: the PDF must contain embedded text with the configured transaction column headers. Scanned-image PDFs return `PDF_OCR_REQUIRED`; FinPilot does not send financial documents to an external OCR service or silently guess authoritative amounts.
+PDF support is deliberately bounded and deterministic. FinPilot accepts embedded-text tables that are either delimiter-separated with the configured mapping or visually aligned with recognizable date, transaction-details, amount, and debit/credit columns. The aligned adapter supports common multi-line statement dates and Indian-formatted amounts without depending on a bank name. Scanned-image PDFs return `PDF_OCR_REQUIRED`; FinPilot does not send financial documents to an external OCR service or silently guess authoritative amounts.
 
 For a reproducible PDF-path demonstration, upload `evaluation/datasets/phase2_golden.pdf`. It is generated from the same synthetic seven-row truth fixture by `scripts/generate_pdf_statement_fixture.py` and intentionally retains the duplicate, malformed date, missing balance, transfer, refund, and inert prompt-injection text.
 

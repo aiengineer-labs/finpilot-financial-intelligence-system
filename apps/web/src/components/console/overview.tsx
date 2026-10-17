@@ -137,7 +137,7 @@ export function Overview({ insights, transactions, snapshot, hasAccount, busy, o
 function Onboarding({ hasAccount, busy, onLoadSample, onNavigate }: { hasAccount: boolean; busy: boolean; onLoadSample: () => void; onNavigate: (view: View) => void }) {
   const steps = [
     { title: "Create a private account", detail: "An empty INR ledger. No balance is invented.", done: hasAccount },
-    { title: "Import a statement", detail: "Content-validated CSV or text PDF with an explicit mapping.", done: false },
+    { title: "Import a statement", detail: "Content-validated CSV or supported text PDF with traceable parsing.", done: false },
     { title: "Run deterministic analysis", detail: "Snapshot, recurrence, anomalies and a 30/60/90-day forecast.", done: false },
     { title: "Ask the verified advisor", detail: "Mesh-powered specialists, checked by plain-code verification.", done: false }
   ];

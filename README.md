@@ -7,7 +7,7 @@ FinPilot is a production-oriented, tenant-isolated financial intelligence applic
 ## Working features
 
 - Passwordless synthetic-workspace entry in the web console; internal short-lived authorization and server-derived tenant isolation remain enforced by the API.
-- Content-validated CSV and text-PDF ingestion with explicit mappings, parser provenance, row errors, exact minor units, transfers/refunds, source evidence, and idempotent replay.
+- Content-validated CSV and text-PDF ingestion with explicit mappings, reusable delimited/aligned-column adapters, parser provenance, row errors, exact minor units, transfers/refunds, source evidence, and idempotent replay.
 - Recurrence, robust anomaly detection, immutable snapshots, chronological backtests, 30/60/90-day forecasts, and what-if branches.
 - Typed LangGraph analyst, advisor, critic, and verifier flow. All model inference uses Mesh; no provider fallback exists.
 - Deterministic input/tool policy, NeMo Guardrails, Presidio minimization, fail-closed output verification, and persisted audit events.
