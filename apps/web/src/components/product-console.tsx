@@ -7,7 +7,7 @@ import { ForecastView, type RunConfig } from "./console/forecast";
 import { DigestView, GovernanceView } from "./console/governance";
 import { Inspector } from "./console/inspector";
 import { Ledger } from "./console/ledger";
-import { LiveDemo } from "./console/live-demo";
+import { type Activity, LiveDemo } from "./console/live-demo";
 import { Overview } from "./console/overview";
 import { type StageId, VIEWS } from "./console/shared";
 import { Sidebar } from "./console/sidebar";
@@ -41,6 +41,16 @@ const ACCOUNT_NAMES: Record<AccountType, string> = { deposit: "Bank account", cr
 
 function message(caught: unknown, fallback: string) {
   return caught instanceof Error ? caught.message : fallback;
+}
+
+function advisorFailureMessage(caught: unknown) {
+  const detail = message(caught, "The advisor could not complete this run").replace(/^agent execution failed safely:\s*/i, "");
+  if (detail.includes("insufficient balance")) return "The Mesh account does not have enough balance for this model. Your deterministic analysis is saved; add provider credit and retry the advisor.";
+  if (detail.includes("configured API key")) return "Mesh rejected the configured API key. Your deterministic analysis is saved; update the server credential and retry the advisor.";
+  if (detail.includes("output guardrail")) return "The safety guardrail blocked the model's wording, so no advice was released. Your deterministic analysis is saved; retry the advisor.";
+  if (detail.includes("rate-limited")) return "Mesh is rate-limiting requests. Your deterministic analysis is saved; wait briefly and retry the advisor.";
+  if (detail.includes("did not respond in time") || detail.includes("temporarily unavailable") || detail.includes("could not be reached")) return `${detail}. Your deterministic analysis is saved; retry the advisor when Mesh is available.`;
+  return `${detail}. No recommendation was released.`;
 }
 
 /** Keeps the what-if date inside (as_of, as_of + horizon], which the scenario API requires. */
@@ -109,6 +119,7 @@ export function ProductConsole() {
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [agentRun, setAgentRun] = useState<AgentRun | null>(null);
+  const [advisorError, setAdvisorError] = useState("");
   const [visibleEvents, setVisibleEvents] = useState(0);
   const [governance, setGovernance] = useState<GovernanceData | null>(null);
   const [digestPreference, setDigestPreference] = useState<DigestPreference | null>(null);
@@ -243,6 +254,7 @@ export function ProductConsole() {
       setForecast(null);
       setScenario(null);
       setAgentRun(null);
+      setAdvisorError("");
       setVisibleEvents(0);
       setUploadResult(null);
       await loadWorkspace(auth, accountId);
@@ -285,6 +297,9 @@ export function ProductConsole() {
       setSnapshot(null);
       setForecast(null);
       setScenario(null);
+      setAgentRun(null);
+      setVisibleEvents(0);
+      setAdvisorError("");
       await loadWorkspace(auth, account.id);
       const kindLabel = result.statement_kind === "unknown" ? "" : ` · ${humanize(result.statement_kind)} statement`;
       push({
@@ -391,6 +406,7 @@ export function ProductConsole() {
       : { snapshot_id: grounding?.id, question };
     setBusy("advisor");
     setAgentRun(null);
+    setAdvisorError("");
     setVisibleEvents(0);
     setInspectorOpen(true);
     try {
@@ -401,7 +417,9 @@ export function ProductConsole() {
       await loadGovernance(auth).catch(() => undefined);
       push({ tone: run.verification_status === "accept" ? "success" : "error", title: run.verification_status === "accept" ? "Advice verified and released" : "Advice withheld by the verifier", body: `${run.events.length} events persisted · ${run.recommendations.length} recommendations` });
     } catch (caught) {
-      push({ tone: "error", title: "Advisor step failed safely", body: message(caught, "No advice was released") });
+      const failure = advisorFailureMessage(caught);
+      setAdvisorError(failure);
+      push({ tone: "error", title: "Advisor unavailable", body: failure });
     } finally {
       setBusy(null);
     }
@@ -493,13 +511,12 @@ export function ProductConsole() {
           <main className="startup-layout">
             <section className="glass-strong startup-card" aria-live="polite">
               <span className="startup-mark"><Icon name={startupError ? "alert" : "refresh"} size={22} className={!startupError ? "spin" : ""} /></span>
-              <p className="eyebrow">FINPILOT WORKSPACE</p>
-              <h1>{startupError ? "The workspace could not open" : "Preparing your decision cockpit"}</h1>
-              <p className="lede">{startupError || "Opening an empty, isolated statement workspace. No login or password is required."}</p>
+              <p className="eyebrow">FINPILOT</p>
+              <h1>{startupError ? "FinPilot could not start" : "Preparing your analysis"}</h1>
+              <p className="lede">{startupError || "Getting your statement analysis tools ready."}</p>
               {startupError ? (
                 <button className="btn btn-primary btn-lg" onClick={() => void startDemo()} disabled={busy !== null}><Icon name="refresh" size={15} />Try again</button>
               ) : <div className="startup-progress"><i /></div>}
-              <small className="fine-print"><Icon name="lock" size={12} />No preloaded ledger · isolated workspace · deterministic money math</small>
             </section>
           </main>
         </div>
@@ -517,11 +534,12 @@ export function ProductConsole() {
   if (agentRun?.verification_status === "accept") completed.add("verify");
 
   const meta = mode === "demo"
-    ? { label: "Live Demo", subtitle: "A guided, end-to-end decision run" }
+    ? { label: "Analyze statement", subtitle: "Upload a statement and get verified insights" }
     : mode === "system"
       ? { label: "How it works", subtitle: "Architecture, agents and trace replay" }
       : VIEWS.find((item) => item.id === view) ?? VIEWS[0];
   const working = busy !== null;
+  const activity: Activity = busy === "upload" || busy === "analysis" || busy === "advisor" ? busy : null;
   const spendingOnly = isSpendingOnly(activeAccount, transactions);
   const canAnalyse = Boolean(activeAccount && transactions.length && config.asOf);
 
@@ -559,25 +577,25 @@ export function ProductConsole() {
           <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Icon name="sidebar" size={17} /></button>
           <div className="toolbar-title"><h1>{meta.label}</h1><small>{meta.subtitle}</small></div>
           <div className="mode-switch" role="tablist" aria-label="Product mode">
-            <button role="tab" aria-selected={mode === "demo"} className={mode === "demo" ? "active" : ""} onClick={() => setMode("demo")}><Icon name="play" size={13} />Live Demo</button>
+            <button role="tab" aria-selected={mode === "demo"} className={mode === "demo" ? "active" : ""} onClick={() => setMode("demo")}><Icon name="play" size={13} />Analyze</button>
             <button role="tab" aria-selected={mode === "console"} className={mode === "console" ? "active" : ""} onClick={() => setMode("console")}><Icon name="terminal" size={13} />Console</button>
             <button role="tab" aria-selected={mode === "system"} className={mode === "system" ? "active" : ""} onClick={() => setMode("system")}><Icon name="system" size={13} />How it works</button>
           </div>
           <button className="search-trigger" onClick={() => setPaletteOpen(true)} aria-label="Open command palette"><Icon name="search" size={15} /><span>Search or jump to…</span><Kbd>⌘K</Kbd></button>
           <ThemeToggle />
           <button className={`icon-btn ${inspectorOpen ? "active" : ""}`} onClick={() => setInspectorOpen((open) => !open)} aria-label="Toggle agent log" aria-pressed={inspectorOpen}><Icon name="terminal" size={17} />{agentRun && <span className="badge-dot" />}</button>
-          <button className="btn btn-primary run-btn" onClick={runPipeline} disabled={working || !canAnalyse} title={spendingOnly ? "Deterministic spending analysis, then the Mesh-powered advisor graph" : "Deterministic analysis, then the Mesh-powered advisor graph"}>
-            <Icon name={working ? "refresh" : "play"} size={13} className={working ? "spin" : ""} />
+          <button className="btn btn-ai run-btn" onClick={runPipeline} disabled={working || !canAnalyse} title={spendingOnly ? "Deterministic spending analysis, then the Mesh-powered advisor graph" : "Deterministic analysis, then the Mesh-powered advisor graph"}>
+            <Icon name={working ? "refresh" : "advice"} size={14} className={working ? "spin" : ""} />
             <span>{busy === "analysis" ? "Analysing…" : busy === "advisor" ? "Agents working…" : "Run FinPilot"}</span>
           </button>
         </header>
 
         <div className={`view ${working ? "is-busy" : ""}`} key={view}>
-          {mode === "demo" && <LiveDemo insights={insights} rowCount={transactionTotal} completed={completed} snapshot={snapshot} forecast={forecast} scenario={scenario} run={agentRun} uploadResult={uploadResult} spendingOnly={spendingOnly} busy={working} onUpload={(file) => void importFile(file)} onLoadSample={() => void importFile("sample")} onRun={() => void runPipeline()} onOpenConsole={() => setMode("console")} onOpenHow={() => setMode("system")} />}
+          {mode === "demo" && <LiveDemo insights={insights} rowCount={transactionTotal} completed={completed} snapshot={snapshot} forecast={forecast} scenario={scenario} run={agentRun} advisorError={advisorError} uploadResult={uploadResult} spendingOnly={spendingOnly} busy={working} activity={activity} onUpload={(file) => void importFile(file)} onLoadSample={() => void importFile("sample")} onRun={() => void runPipeline()} onNavigate={navigate} onOpenHow={() => setMode("system")} />}
           {mode === "console" && view === "overview" && <Overview insights={insights} transactions={transactions} snapshot={snapshot} spendingOnly={spendingOnly} hasAccount={accounts.length > 0} busy={working} onNavigate={navigate} onLoadSample={() => void importFile("sample")} onRunAnalysis={() => void runAnalysis()} />}
           {mode === "console" && view === "ledger" && <Ledger transactions={transactions} total={transactionTotal} hasAccount={accounts.length > 0} busy={working} uploadResult={uploadResult} onUpload={(file) => void importFile(file)} onLoadSample={() => void importFile("sample")} onCreateAccount={() => void createAccount()} onCorrect={correctCategory} />}
           {mode === "console" && view === "forecast" && <ForecastView config={config} setConfig={setConfig} snapshot={snapshot} forecast={forecast} scenario={scenario} spendingOnly={spendingOnly} canRun={canAnalyse} busy={working} onRunAnalysis={() => void runAnalysis()} onAskAdvisor={() => void askAdvisor()} />}
-          {mode === "console" && view === "advice" && <AdvisorView run={agentRun} ready={Boolean(forecast || snapshot)} question={question} setQuestion={setQuestion} visibleEvents={visibleEvents} busy={working} onAsk={() => void askAdvisor()} />}
+          {mode === "console" && view === "advice" && <AdvisorView run={agentRun} ready={Boolean(forecast || snapshot)} question={question} setQuestion={setQuestion} visibleEvents={visibleEvents} error={advisorError} busy={working} onAsk={() => void askAdvisor()} />}
           {mode === "console" && view === "audit" && <AuditView run={agentRun} />}
           {mode === "console" && view === "governance" && <GovernanceView data={governance} busy={working} createDemo={() => void createGovernanceDemo()} rejectReview={(id) => void rejectReview(id)} />}
           {mode === "console" && view === "digests" && <DigestView preference={digestPreference} notifications={notifications} busy={working} savePreference={(enabled) => void saveDigestPreference(enabled)} />}

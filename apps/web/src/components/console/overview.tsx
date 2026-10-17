@@ -24,10 +24,7 @@ export function Overview({ insights, transactions, snapshot, spendingOnly, hasAc
 
   const latest = insights.balances[insights.balances.length - 1];
   const first = insights.balances[0];
-  const slices = categorySlices(insights.categories);
   const byId = new Map(transactions.map((item) => [item.id, item]));
-  const busiest = [...insights.dailySpend.entries()].sort((a, b) => b[1] - a[1])[0];
-  const spanDays = insights.firstDay && insights.lastDay ? dayDiff(insights.firstDay, insights.lastDay) + 1 : 0;
 
   return (
     <div className="view-grid">
@@ -65,22 +62,9 @@ export function Overview({ insights, transactions, snapshot, spendingOnly, hasAc
         </details>
       </Panel>
 
-      <Panel className="span-5">
-        <PanelHeader eyebrow="SPEND MIX" title="Where money went" subtitle="Hover a slice or row for detail" />
-        {slices.length ? <Donut slices={slices} centerLabel="Total spend" /> : <EmptyState icon="overview" title="No spending yet" />}
-      </Panel>
+      <SpendMixPanel insights={insights} />
 
-      <Panel className="span-7">
-        <PanelHeader eyebrow="RHYTHM" title="Daily spending calendar" subtitle="Quartiles of non-zero spending days" />
-        {insights.firstDay && insights.lastDay && <CalendarHeatmap start={insights.firstDay} end={insights.lastDay} values={insights.dailySpend} />}
-        {busiest && (
-          <div className="mini-stats">
-            <div><span>Busiest day</span><b>{money(busiest[1])}</b><small>{shortDate(busiest[0])}</small></div>
-            <div><span>Average spending day</span><b>{money(Math.round(insights.spend / Math.max(insights.dailySpend.size, 1)))}</b><small>{insights.dailySpend.size} days with spending</small></div>
-            <div><span>No-spend days</span><b>{spanDays - insights.dailySpend.size}</b><small>of {spanDays} calendar days</small></div>
-          </div>
-        )}
-      </Panel>
+      <RhythmPanel insights={insights} />
 
       <Panel className="span-5">
         <PanelHeader eyebrow="MERCHANTS" title="Top merchants by spend" />
@@ -132,6 +116,41 @@ export function Overview({ insights, transactions, snapshot, spendingOnly, hasAc
         ) : <EmptyState icon="alert" title="Awaiting a snapshot">Anomalies are computed with the versioned snapshot.</EmptyState>}
       </Panel>
     </div>
+  );
+}
+
+/** Busiest day, average spending day and no-spend days over the statement's calendar span. */
+export function spendingRhythm(insights: Insights) {
+  const busiest = [...insights.dailySpend.entries()].sort((a, b) => b[1] - a[1])[0] ?? null;
+  const spanDays = insights.firstDay && insights.lastDay ? dayDiff(insights.firstDay, insights.lastDay) + 1 : 0;
+  const spendDays = insights.dailySpend.size;
+  return { busiest, spanDays, spendDays, quietDays: spanDays - spendDays, averageDay: Math.round(insights.spend / Math.max(spendDays, 1)) };
+}
+
+export function RhythmPanel({ insights, className = "span-7" }: { insights: Insights; className?: string }) {
+  const rhythm = spendingRhythm(insights);
+  return (
+    <Panel className={className}>
+      <PanelHeader eyebrow="RHYTHM" title="Daily spending calendar" subtitle="Quartiles of non-zero spending days" />
+      {insights.firstDay && insights.lastDay && <CalendarHeatmap start={insights.firstDay} end={insights.lastDay} values={insights.dailySpend} />}
+      {rhythm.busiest && (
+        <div className="mini-stats">
+          <div><span>Busiest day</span><b>{money(rhythm.busiest[1])}</b><small>{shortDate(rhythm.busiest[0])}</small></div>
+          <div><span>Average spending day</span><b>{money(rhythm.averageDay)}</b><small>{rhythm.spendDays} days with spending</small></div>
+          <div><span>No-spend days</span><b>{rhythm.quietDays}</b><small>of {rhythm.spanDays} calendar days</small></div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+export function SpendMixPanel({ insights, className = "span-5" }: { insights: Insights; className?: string }) {
+  const slices = categorySlices(insights.categories);
+  return (
+    <Panel className={className}>
+      <PanelHeader eyebrow="SPEND MIX" title="Where money went" subtitle="Hover a slice or row for detail" />
+      {slices.length ? <Donut slices={slices} centerLabel="Total spend" /> : <EmptyState icon="overview" title="No spending yet" />}
+    </Panel>
   );
 }
 

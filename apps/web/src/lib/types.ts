@@ -54,8 +54,10 @@ export type Recommendation = {
   verification_status: string;
 };
 export type AgentRun = {
-  id: string; forecast_id: string | null; intent: string;
+  id: string; snapshot_id: string; forecast_id: string | null; scenario_run_id: string | null;
+  question: string; intent: string;
   status: string; verification_status: string; final_response: string; model_id: string;
+  graph_version: string; prompt_version: string; artifact_lineage: Record<string, string>;
   revision_attempts: number; total_latency_ms: number; total_input_tokens: number;
   total_output_tokens: number; events: AgentEvent[]; recommendations: Recommendation[];
 };
@@ -66,6 +68,7 @@ export type GovernanceSummary = {
 };
 export type GovernanceArtifact = {
   id: string; artifact_type: string; name: string; version: string; content_sha256: string;
+  configuration: Record<string, string | number | boolean | string[]>;
   status: string; approval_source: string; approval_reason: string | null; created_at: string;
 };
 export type GovernanceRisk = {
