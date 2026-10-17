@@ -17,11 +17,11 @@ import { Icon } from "./ui/icons";
 import { Kbd } from "./ui/primitives";
 import { ThemeToggle, setThemePreference } from "./ui/theme";
 import { ToastStack, useToasts } from "./ui/toast";
-import { DEFAULT_MAPPING, SAMPLE_STATEMENT, type Session, request } from "@/lib/client";
+import { ApiError, DEFAULT_MAPPING, SAMPLE_STATEMENT, type Session, request } from "@/lib/client";
 import { addDays, compactMoney, humanize, minorFromRupees } from "@/lib/format";
 import { deriveInsights } from "@/lib/insights";
 import type {
-  Account, AgentRun, ArchitectureManifest, DigestPreference, EvaluationRun, Forecast, GovernanceArtifact, GovernanceData,
+  Account, AccountType, AgentRun, ArchitectureManifest, DigestPreference, EvaluationRun, Forecast, GovernanceArtifact, GovernanceData,
   GovernanceRisk, GovernanceSummary, HumanReview, Notification, Scenario, Snapshot, Tenant, Transaction,
   UploadResult, View
 } from "@/lib/types";
@@ -34,6 +34,7 @@ const LEDGER_PAGE = 200;
 const LEDGER_CAP = 1000;
 const DEFAULT_QUESTION = "Can I afford this purchase without jeopardizing my cash buffer?";
 const INITIAL_CONFIG: RunConfig = { asOf: "", horizon: 30, scenarioEnabled: false, scenarioName: "", scenarioAmount: "", scenarioDate: "" };
+const ACCOUNT_NAMES: Record<AccountType, string> = { deposit: "Bank account", credit_card: "Credit card", unknown: "Statement account" };
 
 function message(caught: unknown, fallback: string) {
   return caught instanceof Error ? caught.message : fallback;
@@ -50,11 +51,22 @@ function normalizeConfig(next: RunConfig): RunConfig {
   return next;
 }
 
-async function fetchLedger(auth: Session) {
+/** Card statements and statements without a running balance support spending analysis only. */
+function isSpendingOnly(account: Account | undefined, items: Transaction[]) {
+  return Boolean(items.length && (account?.account_type === "credit_card" || items.every((item) => item.balance_minor === null)));
+}
+
+/** Latest day the engines can anchor on: the latest balance for cash flow, else the latest row. */
+function analysisDate(account: Account | undefined, items: Transaction[]) {
+  const anchor = isSpendingOnly(account, items) ? items[0] : items.find((item) => item.balance_minor !== null);
+  return anchor?.transaction_date ?? "";
+}
+
+async function fetchLedger(auth: Session, accountId: string) {
   const items: Transaction[] = [];
   let total = 0;
   for (let offset = 0; offset < LEDGER_CAP; offset += LEDGER_PAGE) {
-    const page = await request<{ items: Transaction[]; total: number }>(`/api/v1/transactions?limit=${LEDGER_PAGE}&offset=${offset}`, {}, auth);
+    const page = await request<{ items: Transaction[]; total: number }>(`/api/v1/transactions?account_id=${accountId}&limit=${LEDGER_PAGE}&offset=${offset}`, {}, auth);
     items.push(...page.items);
     total = page.total;
     if (items.length >= total || page.items.length < LEDGER_PAGE) break;
@@ -80,6 +92,7 @@ export function ProductConsole() {
   const [mode, setMode] = useState<ProductMode>("demo");
   const [view, setView] = useState<View>("overview");
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [transactionTotal, setTransactionTotal] = useState(0);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
@@ -103,6 +116,7 @@ export function ProductConsole() {
   const { toasts, push, dismiss } = useToasts();
 
   const auth: Session | undefined = session ? { token: session.token, tenantId: session.tenant.id } : undefined;
+  const activeAccount = accounts.find((account) => account.id === activeAccountId) ?? accounts[0];
   const insights = useMemo(() => deriveInsights(transactions), [transactions]);
 
   function navigate(next: View) {
@@ -149,13 +163,15 @@ export function ProductConsole() {
     setArchitecture(await request<ArchitectureManifest>("/api/v1/system/architecture", {}, scope));
   }
 
-  async function loadWorkspace(scope: Session) {
-    const [nextAccounts, ledger] = await Promise.all([request<Account[]>("/api/v1/accounts", {}, scope), fetchLedger(scope)]);
+  async function loadWorkspace(scope: Session, preferredAccountId?: string) {
+    const nextAccounts = await request<Account[]>("/api/v1/accounts", {}, scope);
+    const active = nextAccounts.find((account) => account.id === (preferredAccountId ?? activeAccountId)) ?? nextAccounts[0];
+    const ledger = active ? await fetchLedger(scope, active.id) : { items: [], total: 0 };
     setAccounts(nextAccounts);
+    setActiveAccountId(active?.id ?? null);
     setTransactions(ledger.items);
     setTransactionTotal(ledger.total);
-    const known = ledger.items.find((item) => item.balance_minor !== null);
-    if (known) setConfig({ asOf: known.transaction_date });
+    setConfig({ asOf: analysisDate(active, ledger.items) });
     const results = await Promise.allSettled([loadGovernance(scope), loadDigests(scope), loadArchitecture(scope)]);
     const failed = results.find((result) => result.status === "rejected");
     if (failed) push({ tone: "error", title: "Some workspace panels could not load", body: message(failed.reason, "Governance, digest, or architecture data is unavailable") });
@@ -188,13 +204,43 @@ export function ProductConsole() {
   /* ---------- ledger ---------- */
 
   async function ensureAccount(scope: Session) {
-    if (accounts[0]) return accounts[0];
+    if (activeAccount) return activeAccount;
     const account = await request<Account>("/api/v1/accounts", {
       method: "POST",
       body: JSON.stringify({ name: "Primary account", currency: "INR", external_reference: crypto.randomUUID() })
     }, scope);
     setAccounts([account]);
+    setActiveAccountId(account.id);
     return account;
+  }
+
+  /** A statement of another kind (card vs bank) gets its own account instead of being mixed in. */
+  async function accountFor(scope: Session, kind: AccountType) {
+    const current = await request<Account[]>("/api/v1/accounts", {}, scope);
+    const existing = current.find((account) => account.account_type === kind);
+    if (existing) return existing;
+    return request<Account>("/api/v1/accounts", {
+      method: "POST",
+      body: JSON.stringify({ name: ACCOUNT_NAMES[kind], currency: "INR", external_reference: crypto.randomUUID(), account_type: kind })
+    }, scope);
+  }
+
+  async function switchAccount(accountId: string) {
+    if (!auth || accountId === activeAccount?.id) return;
+    setBusy("account");
+    try {
+      setSnapshot(null);
+      setForecast(null);
+      setScenario(null);
+      setAgentRun(null);
+      setVisibleEvents(0);
+      setUploadResult(null);
+      await loadWorkspace(auth, accountId);
+    } catch (caught) {
+      push({ tone: "error", title: "Could not open the account", body: message(caught, "The ledger could not be loaded") });
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function createAccount() {
@@ -214,17 +260,27 @@ export function ProductConsole() {
     if (!auth) return;
     setBusy("upload");
     try {
-      const account = await ensureAccount(auth);
-      const result = await uploadStatement(auth, account.id, file === "sample" ? await sampleFile() : file);
+      const statement = file === "sample" ? await sampleFile() : file;
+      let account = await ensureAccount(auth);
+      let result: UploadResult;
+      try {
+        result = await uploadStatement(auth, account.id, statement);
+      } catch (caught) {
+        const kind = caught instanceof ApiError && caught.code === "ACCOUNT_TYPE_MISMATCH" ? caught.statementKind : undefined;
+        if (kind !== "deposit" && kind !== "credit_card") throw caught;
+        account = await accountFor(auth, kind);
+        result = await uploadStatement(auth, account.id, statement);
+      }
       setUploadResult(result);
       setSnapshot(null);
       setForecast(null);
       setScenario(null);
-      await loadWorkspace(auth);
+      await loadWorkspace(auth, account.id);
+      const kindLabel = result.statement_kind === "unknown" ? "" : ` · ${humanize(result.statement_kind)} statement`;
       push({
         tone: result.rejected_rows && !result.accepted_rows ? "error" : "success",
-        title: result.replayed ? "Statement already imported" : "Statement imported",
-        body: `${result.accepted_rows} accepted · ${result.duplicate_rows} duplicate · ${result.rejected_rows} rejected`
+        title: result.replayed ? "Statement already imported" : `Statement imported into ${account.name}`,
+        body: `${result.accepted_rows} accepted · ${result.duplicate_rows} duplicate · ${result.rejected_rows} rejected${kindLabel}`
       });
     } catch (caught) {
       push({ tone: "error", title: "Import failed", body: message(caught, "The statement could not be imported") });
@@ -252,12 +308,12 @@ export function ProductConsole() {
   /* ---------- analysis & advice ---------- */
 
   async function runAnalysis(): Promise<{ forecast: Forecast; scenario: Scenario | null } | null> {
-    if (!auth || !accounts[0] || !transactions.length) {
+    if (!auth || !activeAccount || !transactions.length) {
       push({ tone: "error", title: "Import a statement first", body: "The analysis needs persisted ledger rows." });
       return null;
     }
     if (!config.asOf) {
-      push({ tone: "error", title: "Choose a known-balance date", body: "The latest transaction on that date must carry a source balance." });
+      push({ tone: "error", title: "Choose an analysis date", body: "Pick a day that has imported transactions." });
       return null;
     }
     let shockMinor = 0;
@@ -271,8 +327,18 @@ export function ProductConsole() {
     }
     setBusy("analysis");
     try {
-      const nextSnapshot = await request<Snapshot>("/api/v1/analytics/snapshots", { method: "POST", body: JSON.stringify({ account_id: accounts[0].id, as_of: config.asOf }) }, auth);
+      const nextSnapshot = await request<Snapshot>("/api/v1/analytics/snapshots", { method: "POST", body: JSON.stringify({ account_id: activeAccount.id, as_of: config.asOf }) }, auth);
       setSnapshot(nextSnapshot);
+      if (nextSnapshot.analysis_mode === "spending") {
+        setForecast(null);
+        setScenario(null);
+        push({
+          tone: "info",
+          title: "Spending analysis ready",
+          body: `${nextSnapshot.source_transaction_count} rows · ${nextSnapshot.recurring_patterns.length} recurring patterns · ${nextSnapshot.anomaly_results.length} anomalies. Cash forecasting needs a statement with a running balance.`
+        });
+        return null;
+      }
       const nextForecast = await request<Forecast>("/api/v1/analytics/forecasts", { method: "POST", body: JSON.stringify({ snapshot_id: nextSnapshot.id, horizon_days: config.horizon }) }, auth);
       setForecast(nextForecast);
       let nextScenario: Scenario | null = null;
@@ -437,7 +503,8 @@ export function ProductConsole() {
       ? { label: "How it works", subtitle: "Architecture, agents and trace replay" }
       : VIEWS.find((item) => item.id === view) ?? VIEWS[0];
   const working = busy !== null;
-  const canAnalyse = Boolean(accounts[0] && transactions.length && config.asOf);
+  const spendingOnly = isSpendingOnly(activeAccount, transactions);
+  const canAnalyse = Boolean(activeAccount && transactions.length && config.asOf);
 
   const commands: Command[] = [
     ...VIEWS.map((item) => ({ id: `view-${item.id}`, label: item.label, group: "Go to", icon: item.icon, run: () => navigate(item.id) })),
@@ -455,6 +522,10 @@ export function ProductConsole() {
     <div className={`app-shell ${inspectorOpen ? "inspector-open" : ""}`}>
       <Sidebar
         tenant={session.tenant}
+        accounts={accounts}
+        activeAccountId={activeAccount?.id}
+        busy={busy !== null}
+        onSwitchAccount={(accountId) => { void switchAccount(accountId); setSidebarOpen(false); }}
         view={mode === "demo" ? null : mode === "system" ? "system" : view}
         open={sidebarOpen}
         badges={{ ledger: transactionTotal, governance: governance?.summary.pending_reviews, advice: agentRun?.recommendations.length }}
@@ -476,17 +547,17 @@ export function ProductConsole() {
           <button className="search-trigger" onClick={() => setPaletteOpen(true)} aria-label="Open command palette"><Icon name="search" size={15} /><span>Search or jump to…</span><Kbd>⌘K</Kbd></button>
           <ThemeToggle />
           <button className={`icon-btn ${inspectorOpen ? "active" : ""}`} onClick={() => setInspectorOpen((open) => !open)} aria-label="Toggle agent log" aria-pressed={inspectorOpen}><Icon name="terminal" size={17} />{agentRun && <span className="badge-dot" />}</button>
-          <button className="btn btn-primary run-btn" onClick={runPipeline} disabled={working || !canAnalyse} title="Deterministic analysis, then the Mesh-powered advisor graph">
+          <button className="btn btn-primary run-btn" onClick={runPipeline} disabled={working || !canAnalyse} title={spendingOnly ? "Deterministic spending analysis" : "Deterministic analysis, then the Mesh-powered advisor graph"}>
             <Icon name={working ? "refresh" : "play"} size={13} className={working ? "spin" : ""} />
-            <span>{busy === "analysis" ? "Analysing…" : busy === "advisor" ? "Agents working…" : "Run FinPilot"}</span>
+            <span>{busy === "analysis" ? "Analysing…" : busy === "advisor" ? "Agents working…" : spendingOnly ? "Analyse spending" : "Run FinPilot"}</span>
           </button>
         </header>
 
         <div className={`view ${working ? "is-busy" : ""}`} key={view}>
-          {mode === "demo" && <LiveDemo insights={insights} rowCount={transactionTotal} completed={completed} snapshot={snapshot} forecast={forecast} scenario={scenario} run={agentRun} uploadResult={uploadResult} busy={working} onUpload={(file) => void importFile(file)} onLoadSample={() => void importFile("sample")} onRun={() => void runPipeline()} onOpenConsole={() => setMode("console")} onOpenHow={() => setMode("system")} />}
-          {mode === "console" && view === "overview" && <Overview insights={insights} transactions={transactions} snapshot={snapshot} hasAccount={accounts.length > 0} busy={working} onNavigate={navigate} onLoadSample={() => void importFile("sample")} onRunAnalysis={() => void runAnalysis()} />}
+          {mode === "demo" && <LiveDemo insights={insights} rowCount={transactionTotal} completed={completed} snapshot={snapshot} forecast={forecast} scenario={scenario} run={agentRun} uploadResult={uploadResult} spendingOnly={spendingOnly} busy={working} onUpload={(file) => void importFile(file)} onLoadSample={() => void importFile("sample")} onRun={() => void runPipeline()} onOpenConsole={() => setMode("console")} onOpenHow={() => setMode("system")} />}
+          {mode === "console" && view === "overview" && <Overview insights={insights} transactions={transactions} snapshot={snapshot} spendingOnly={spendingOnly} hasAccount={accounts.length > 0} busy={working} onNavigate={navigate} onLoadSample={() => void importFile("sample")} onRunAnalysis={() => void runAnalysis()} />}
           {mode === "console" && view === "ledger" && <Ledger transactions={transactions} total={transactionTotal} hasAccount={accounts.length > 0} busy={working} uploadResult={uploadResult} onUpload={(file) => void importFile(file)} onLoadSample={() => void importFile("sample")} onCreateAccount={() => void createAccount()} onCorrect={correctCategory} />}
-          {mode === "console" && view === "forecast" && <ForecastView config={config} setConfig={setConfig} snapshot={snapshot} forecast={forecast} scenario={scenario} canRun={canAnalyse} busy={working} onRunAnalysis={() => void runAnalysis()} onAskAdvisor={() => void askAdvisor()} />}
+          {mode === "console" && view === "forecast" && <ForecastView config={config} setConfig={setConfig} snapshot={snapshot} forecast={forecast} scenario={scenario} spendingOnly={spendingOnly} canRun={canAnalyse} busy={working} onRunAnalysis={() => void runAnalysis()} onAskAdvisor={() => void askAdvisor()} />}
           {mode === "console" && view === "advice" && <AdvisorView run={agentRun} forecast={forecast} question={question} setQuestion={setQuestion} visibleEvents={visibleEvents} busy={working} onAsk={() => void askAdvisor()} />}
           {mode === "console" && view === "audit" && <AuditView run={agentRun} />}
           {mode === "console" && view === "governance" && <GovernanceView data={governance} busy={working} createDemo={() => void createGovernanceDemo()} rejectReview={(id) => void rejectReview(id)} />}

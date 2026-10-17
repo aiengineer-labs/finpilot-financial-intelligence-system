@@ -23,6 +23,7 @@ class UploadResponse(BaseModel):
     page_count: int | None
     warnings: list[str]
     processing_duration_ms: int
+    statement_kind: str
     replayed: bool = False
 
 
@@ -30,6 +31,7 @@ class TransactionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    account_id: UUID
     upload_id: UUID
     transaction_date: date
     amount_minor: int

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import (
+    AccountType,
     CalculationSnapshot,
     FinancialAccount,
     ScenarioPoint,
@@ -30,7 +31,7 @@ from app.engines.financial import (
     run_scenario,
 )
 
-ENGINE_VERSION = "financial-v1"
+ENGINE_VERSION = "financial-v2"
 
 
 def _engine_transaction(row: Transaction) -> EngineTransaction:
@@ -46,11 +47,32 @@ def _engine_transaction(row: Transaction) -> EngineTransaction:
     )
 
 
-def _snapshot_hash(account: FinancialAccount, as_of: date, rows: list[Transaction]) -> str:
+def _closing_balance(day_rows: list[Transaction]) -> int | None:
+    """Return the end-of-day source balance without trusting row order within the day.
+
+    Each running balance equals the previous balance plus the row amount, so the closing
+    row is the one whose balance is not the opening balance of another row that day.
+    """
+
+    known = [
+        (row.balance_minor, row.amount_minor) for row in day_rows if row.balance_minor is not None
+    ]
+    if not known:
+        return None
+    openings = {balance - amount for balance, amount in known}
+    closing = [balance for balance, _ in known if balance not in openings]
+    return closing[0] if len(closing) == 1 else known[-1][0]
+
+
+def _snapshot_hash(
+    account: FinancialAccount, as_of: date, analysis_mode: str, rows: list[Transaction]
+) -> str:
     manifest = {
         "account_id": str(account.id),
         "as_of": as_of.isoformat(),
         "currency": account.currency,
+        "account_type": account.account_type.value,
+        "analysis_mode": analysis_mode,
         "transactions": [
             {
                 "id": str(row.id),
@@ -90,11 +112,25 @@ async def create_snapshot(
         raise ValueError("at least one imported transaction is required")
     as_of = requested_as_of or rows[-1].transaction_date
     latest = rows[-1]
-    if latest.transaction_date != as_of or latest.balance_minor is None:
+    if latest.transaction_date != as_of:
         raise ValueError(
-            "the latest transaction on the snapshot date must include a known source balance"
+            "the snapshot date must match the latest imported transaction on or before that date"
         )
-    input_sha256 = _snapshot_hash(account, as_of, rows)
+    spending_only = account.account_type is AccountType.CREDIT_CARD or all(
+        row.balance_minor is None for row in rows
+    )
+    analysis_mode = "spending" if spending_only else "cashflow"
+    opening_balance_minor = (
+        None
+        if spending_only
+        else _closing_balance([row for row in rows if row.transaction_date == as_of])
+    )
+    if analysis_mode == "cashflow" and opening_balance_minor is None:
+        raise ValueError(
+            f"Cash forecasting needs a statement balance on {as_of.isoformat()}. "
+            "Choose a date whose transactions show a running balance"
+        )
+    input_sha256 = _snapshot_hash(account, as_of, analysis_mode, rows)
     existing = await session.scalar(
         select(CalculationSnapshot).where(
             CalculationSnapshot.tenant_id == tenant_id,
@@ -123,7 +159,8 @@ async def create_snapshot(
         account_id=account_id,
         as_of=as_of,
         currency=account.currency,
-        opening_balance_minor=latest.balance_minor,
+        opening_balance_minor=opening_balance_minor,
+        analysis_mode=analysis_mode,
         source_transaction_count=len(rows),
         source_transaction_ids=[str(row.id) for row in rows],
         input_sha256=input_sha256,
@@ -193,6 +230,11 @@ async def create_forecast(
     if loaded is None:
         raise LookupError("snapshot not found")
     snapshot, stored_patterns = loaded
+    if snapshot.analysis_mode != "cashflow" or snapshot.opening_balance_minor is None:
+        raise ValueError(
+            "Cash forecasting is unavailable for a balance-free or credit-card statement. "
+            "Spending, recurrence, and anomaly analysis remain available."
+        )
     existing = await session.scalar(
         select(StoredForecast).where(
             StoredForecast.tenant_id == tenant_id,

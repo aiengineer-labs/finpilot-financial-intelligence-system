@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import TenantContext, tenant_context
-from app.database.models import FinancialAccount
+from app.database.models import AccountType, FinancialAccount
 from app.database.session import get_session
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -17,6 +17,7 @@ class AccountCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     currency: str = Field(default="INR", pattern=r"^[A-Z]{3}$")
     external_reference: str = Field(min_length=1, max_length=128)
+    account_type: AccountType = AccountType.UNKNOWN
 
 
 class AccountResponse(BaseModel):
@@ -26,6 +27,7 @@ class AccountResponse(BaseModel):
     name: str
     currency: str
     external_reference: str
+    account_type: AccountType
 
 
 @router.get("", response_model=list[AccountResponse])

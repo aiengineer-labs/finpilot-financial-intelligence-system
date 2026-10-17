@@ -36,6 +36,7 @@ def _snapshot_response(snapshot, patterns) -> SnapshotResponse:  # type: ignore[
         as_of=snapshot.as_of,
         currency=snapshot.currency,
         opening_balance_minor=snapshot.opening_balance_minor,
+        analysis_mode=snapshot.analysis_mode,
         source_transaction_count=snapshot.source_transaction_count,
         source_transaction_ids=snapshot.source_transaction_ids,
         input_sha256=snapshot.input_sha256,

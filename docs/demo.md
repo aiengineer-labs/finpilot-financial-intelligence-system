@@ -1,9 +1,9 @@
 # Demo runbook
 
 1. Start Docker Compose and open `http://localhost:3000`. FinPilot provisions an empty isolated workspace; there is no login or password step and no ledger data is preloaded.
-2. In **Live Demo**, upload a bank CSV or supported text-based PDF. FinPilot detects the content before selecting a parser and rejects renamed, encrypted, active-content, malformed, oversized, or over-budget files. For a safe repeatable demo, download `apps/web/public/samples/finpilot-demo-bank-statement.csv` and upload it, or explicitly select **Use fictional demo CSV**. Both choices call the real ingestion API.
+2. In **Live Demo**, upload a bank or credit-card statement as CSV or text-based PDF. FinPilot detects the content before selecting a parser and rejects renamed, encrypted, active-content, malformed, oversized, or over-budget files. For a safe repeatable demo, download `apps/web/public/samples/finpilot-demo-bank-statement.csv` and upload it, or explicitly select **Use fictional demo CSV**. Both choices call the real ingestion API.
 3. Inspect exact rows, transfer exclusion, confidence, and provenance in Ledger.
-4. In Forecast, keep the detected balance date, pick a horizon and a what-if preset, and choose **Run analysis** (deterministic, no model call). **Ask advisor** or **Run FinPilot** additionally runs the Mesh specialists; live inference requires approved Mesh egress.
+4. In Forecast, keep the detected balance date, pick a horizon and a what-if preset, and choose **Run analysis** (deterministic, no model call). A credit-card or balance-free statement gets **Analyse spending** instead: recurrence and anomalies are computed, while cash forecasting stays disabled because FinPilot never invents a balance. **Ask advisor** or **Run FinPilot** additionally runs the Mesh specialists; live inference requires approved Mesh egress.
 5. Inspect Forecast, verified/withheld Advice, and deterministic-versus-Mesh Audit nodes.
 6. Open How it works to inspect the backend-provided graph manifest, select real nodes, and replay persisted events.
 7. Open Governance to show versions, risks, release blockers, and the synthetic review decision.
@@ -11,7 +11,13 @@
 
 Do not use real financial data in a public demo. Do not describe fake test transport as live Mesh, and do not claim Vercel success until production URLs, migrations, health, cron, and tenant isolation are observed.
 
-PDF support is deliberately bounded and deterministic. FinPilot accepts embedded-text tables that are either delimiter-separated with the configured mapping or visually aligned with recognizable date, transaction-details, amount, and debit/credit columns. The aligned adapter supports common multi-line statement dates and Indian-formatted amounts without depending on a bank name. Scanned-image PDFs return `PDF_OCR_REQUIRED`; FinPilot does not send financial documents to an external OCR service or silently guess authoritative amounts.
+Statement support is deliberately bounded and deterministic.
+
+- **CSV:** the configured mapping is used when its headers are present. Otherwise FinPilot locates the transaction header row (skipping bank preamble lines), maps common labels (Narration, Particulars, Withdrawal/Deposit, Debit/Credit, Dr/Cr, Amount, Closing Balance), and infers the date format from the data. Day-first wins when a column is ambiguous, and the upload records a warning. Amounts may carry `₹`/`Rs.`/`INR`, `Cr`/`Dr` suffixes, or `0.00` placeholders. Decimal-comma amounts are rejected per row rather than guessed.
+- **PDF:** FinPilot accepts embedded-text tables that are delimiter-separated with the configured mapping, visually aligned with per-row debit/credit markers (typical card statements), or column-aligned with withdrawal/deposit/balance columns (typical bank statements). Split multi-line dates and wrapped narration are read in page order, including PDFs whose generator flips the coordinate system. No adapter depends on a bank name.
+- **Accounts:** card statements and bank statements are kept in separate accounts. Uploading one kind into an account of the other kind returns `409 ACCOUNT_TYPE_MISMATCH`, and the console then imports it into a matching account. The sidebar switches between accounts.
+
+Scanned-image PDFs return `PDF_OCR_REQUIRED`; FinPilot does not send financial documents to an external OCR service or silently guess authoritative amounts.
 
 For a reproducible PDF-path demonstration, upload `evaluation/datasets/phase2_golden.pdf`. It is generated from the same synthetic seven-row truth fixture by `scripts/generate_pdf_statement_fixture.py` and intentionally retains the duplicate, malformed date, missing balance, transfer, refund, and inert prompt-injection text.
 

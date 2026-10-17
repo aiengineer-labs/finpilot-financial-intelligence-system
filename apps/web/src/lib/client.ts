@@ -12,7 +12,15 @@ export const DEFAULT_MAPPING = JSON.stringify({
   currency: "Currency", balance: "Balance"
 });
 
-type Detail = string | { code?: string; message?: string } | Array<{ msg?: string; loc?: Array<string | number> }> | undefined;
+type Detail = string | { code?: string; message?: string; statement_kind?: string } | Array<{ msg?: string; loc?: Array<string | number> }> | undefined;
+
+/** A failed API call, keeping the stable error code so callers can recover deliberately. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string, readonly statementKind?: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 function describe(detail: Detail, status: number) {
   if (typeof detail === "string") return detail;
@@ -38,7 +46,8 @@ export async function request<T>(path: string, init: RequestInit = {}, session?:
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { detail?: Detail };
-    throw new Error(describe(body.detail, response.status));
+    const detail = body.detail && typeof body.detail === "object" && !Array.isArray(body.detail) ? body.detail : undefined;
+    throw new ApiError(describe(body.detail, response.status), response.status, detail?.code, detail?.statement_kind);
   }
   return (await response.json()) as T;
 }

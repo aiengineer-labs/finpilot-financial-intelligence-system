@@ -34,6 +34,12 @@ class UploadStatus(StrEnum):
     FAILED = "failed"
 
 
+class AccountType(StrEnum):
+    UNKNOWN = "unknown"
+    DEPOSIT = "deposit"
+    CREDIT_CARD = "credit_card"
+
+
 class TransactionKind(StrEnum):
     INCOME = "income"
     EXPENSE = "expense"
@@ -146,6 +152,9 @@ class FinancialAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(120))
     currency: Mapped[str] = mapped_column(String(3), default="INR")
     external_reference: Mapped[str] = mapped_column(String(128))
+    account_type: Mapped[AccountType] = mapped_column(
+        Enum(AccountType), default=AccountType.UNKNOWN
+    )
     tenant: Mapped[Tenant] = relationship(back_populates="accounts")
     uploads: Mapped[list["TransactionUpload"]] = relationship(back_populates="account")
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="account")
@@ -181,6 +190,7 @@ class TransactionUpload(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     warnings: Mapped[list[str]] = mapped_column(JSON, default=list)
     processing_duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    statement_kind: Mapped[str] = mapped_column(String(20), default="unknown")
     tenant: Mapped[Tenant] = relationship(back_populates="uploads")
     account: Mapped[FinancialAccount] = relationship(back_populates="uploads")
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="upload")
@@ -252,7 +262,8 @@ class CalculationSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     as_of: Mapped[date] = mapped_column(Date)
     currency: Mapped[str] = mapped_column(String(3))
-    opening_balance_minor: Mapped[int] = mapped_column(BigInteger)
+    opening_balance_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    analysis_mode: Mapped[str] = mapped_column(String(20), default="cashflow")
     source_transaction_count: Mapped[int] = mapped_column(Integer)
     source_transaction_ids: Mapped[list[str]] = mapped_column(JSON)
     input_sha256: Mapped[str] = mapped_column(String(64))

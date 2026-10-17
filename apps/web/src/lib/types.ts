@@ -1,9 +1,10 @@
 export type View = "overview" | "ledger" | "forecast" | "advice" | "audit" | "digests" | "governance" | "system";
 
 export type Tenant = { id: string; name: string; role: string };
-export type Account = { id: string; name: string; currency: string };
+export type AccountType = "unknown" | "deposit" | "credit_card";
+export type Account = { id: string; name: string; currency: string; account_type: AccountType };
 export type Transaction = {
-  id: string; transaction_date: string; amount_minor: number; balance_minor: number | null;
+  id: string; account_id: string; transaction_date: string; amount_minor: number; balance_minor: number | null;
   currency: string; merchant_normalized: string; description: string; kind: string;
   category: string; classification_method: string; classification_confidence_bps: number;
   is_excluded_from_cashflow: boolean; source_evidence: Record<string, string | number>;
@@ -14,7 +15,7 @@ export type UploadResult = {
   row_errors: Array<Record<string, string | number>>;
   source_format: "csv" | "pdf"; detected_content_type: string; parser_name: string;
   parser_version: string; extraction_method: string; page_count: number | null; warnings: string[];
-  processing_duration_ms: number;
+  processing_duration_ms: number; statement_kind: AccountType;
 };
 export type Pattern = {
   id: string; merchant: string; cadence: string; typical_amount_minor: number;
@@ -22,7 +23,8 @@ export type Pattern = {
 };
 export type Anomaly = { transaction_id: string; severity: string; explanation: string };
 export type Snapshot = {
-  id: string; as_of: string; currency: string; opening_balance_minor: number;
+  id: string; as_of: string; currency: string; opening_balance_minor: number | null;
+  analysis_mode: "cashflow" | "spending";
   source_transaction_count: number; recurring_patterns: Pattern[]; anomaly_results: Anomaly[];
 };
 export type Point = { day: string; balance_minor: number; recurring_flow_minor: number; estimated_variable_spend_minor: number };

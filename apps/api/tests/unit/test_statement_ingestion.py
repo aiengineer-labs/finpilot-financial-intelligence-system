@@ -9,6 +9,7 @@ from app.services.csv_ingestion import CSVColumnMapping
 from app.services.statement_ingestion import (
     MAX_PDF_PAGES,
     StatementFormat,
+    StatementKind,
     StatementValidationError,
     detect_statement_format,
     parse_statement,
@@ -67,7 +68,12 @@ def statement_pdf(*lines: str, encrypt: bool = False, active: bool = False) -> b
     return output.getvalue()
 
 
-def positioned_statement_pdf(*items: tuple[float, float, str]) -> bytes:
+def positioned_statement_pdf(*items: tuple[float, float, str], flipped: bool = False) -> bytes:
+    """Place text at page coordinates; ``flipped`` mimics HTML-to-PDF renderers.
+
+    Those renderers flip the y axis with ``cm`` and counter-flip each text matrix, so the
+    page looks identical while text-matrix y grows downward.
+    """
     writer = PdfWriter()
     page = writer.add_blank_page(width=700, height=792)
     font = DictionaryObject(
@@ -81,10 +87,13 @@ def positioned_statement_pdf(*items: tuple[float, float, str]) -> bytes:
     page[NameObject("/Resources")] = DictionaryObject(
         {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_reference})}
     )
-    operations = []
+    operations = ["q", "1 0 0 -1 0 792 cm"] if flipped else []
     for x, y, text in items:
         escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-        operations.extend(("BT", "/F1 8 Tf", f"1 0 0 1 {x} {y} Tm", f"({escaped}) Tj", "ET"))
+        matrix = f"1 0 0 -1 {x} {792 - y}" if flipped else f"1 0 0 1 {x} {y}"
+        operations.extend(("BT", "/F1 8 Tf", f"{matrix} Tm", f"({escaped}) Tj", "ET"))
+    if flipped:
+        operations.append("Q")
     stream = DecodedStreamObject()
     stream.set_data("\n".join(operations).encode())
     page[NameObject("/Contents")] = writer._add_object(stream)
@@ -176,6 +185,159 @@ def test_visually_aligned_bank_pdf_supports_split_dates_and_amount_columns() -> 
         "2025-06-17T00:00:00",
     ]
     assert all(evidence["page"] == 1 for evidence in result.source_evidence.values())
+
+
+@pytest.mark.parametrize("flipped", [False, True])
+def test_split_dates_and_wrapped_details_follow_reading_order(flipped: bool) -> None:
+    content = positioned_statement_pdf(
+        (40, 750, "Date"),
+        (90, 750, "Transaction Details"),
+        (470, 750, "Amount"),
+        (530, 750, "Debit/Credit"),
+        (40, 712, "31"),
+        (40, 700, "May"),
+        (40, 688, "'25"),
+        (90, 706, "UPI PAYMENT"),
+        (90, 694, "RECEIVED/refund-0001"),
+        (470, 700, "186.00"),
+        (530, 700, "Credit"),
+        (40, 652, "29 May"),
+        (40, 640, "'25"),
+        (90, 646, "UPI/Food Delivery Ltd"),
+        (470, 646, "341.00"),
+        (530, 646, "Debit"),
+        flipped=flipped,
+    )
+    result = parse_statement(
+        content,
+        filename="card.pdf",
+        claimed_content_type="application/pdf",
+        mapping=_mapping(),
+    )
+    rows = result.transactions.rows
+    assert [row.transaction_date.date().isoformat() for row in rows] == [
+        "2025-05-31",
+        "2025-05-29",
+    ]
+    assert [row.amount_minor for row in rows] == [18_600, -34_100]
+    assert rows[0].description == "UPI PAYMENT RECEIVED/refund-0001"
+
+
+def test_card_statement_markers_classify_the_statement_kind() -> None:
+    content = positioned_statement_pdf(
+        (40, 770, "Synthetic Rewards Credit Card Monthly Statement"),
+        (40, 760, "Credit Limit"),
+        (200, 760, "Minimum Payment Due"),
+        (40, 750, "Date"),
+        (120, 750, "Transaction Details"),
+        (460, 750, "Amount"),
+        (540, 750, "Debit/Credit"),
+        (40, 700, "08 Jun '25"),
+        (120, 700, "UPI/Grocery Market"),
+        (460, 700, "716.00"),
+        (540, 700, "Debit"),
+    )
+    result = parse_statement(
+        content,
+        filename="CARD-STATEMENT.PDF",
+        claimed_content_type="application/pdf",
+        mapping=_mapping(),
+    )
+    assert result.statement_kind is StatementKind.CREDIT_CARD
+    assert [row.amount_minor for row in result.transactions.rows] == [-71_600]
+    assert all(row.balance_minor is None for row in result.transactions.rows)
+
+
+def test_column_table_bank_pdf_reads_withdrawals_deposits_and_balances() -> None:
+    content = positioned_statement_pdf(
+        (40, 770, "Synthetic Bank Savings Account Statement"),
+        (40, 700, "Date"),
+        (100, 700, "Narration"),
+        (300, 700, "Chq./Ref.No."),
+        (380, 700, "Withdrawal Amt."),
+        (450, 700, "Deposit Amt."),
+        (520, 700, "Closing Balance"),
+        (40, 680, "01/09/2026"),
+        (100, 680, "SALARY ACME PAYROLL"),
+        (300, 680, "0000000001"),
+        (452, 680, "85,000.00"),
+        (520, 680, "1,35,000.00"),
+        (40, 666, "13/09/2026"),
+        (100, 666, "UPI/GREEN HOMES RENT/"),
+        (300, 666, "0000000002"),
+        (382, 666, "30,000.00"),
+        (520, 666, "1,05,000.00"),
+        (100, 656, "okaxis/monthly"),
+        (40, 640, "14/09/2026"),
+        (100, 640, "ATM WDL MG ROAD"),
+        (385, 640, "2,000.00"),
+        (520, 640, "1,03,000.00 Cr"),
+        (100, 600, "Closing Balance"),
+        (520, 600, "1,03,000.00"),
+    )
+    result = parse_statement(
+        content,
+        filename="savings.pdf",
+        claimed_content_type="application/pdf",
+        mapping=_mapping(),
+    )
+
+    assert result.extraction_method == "embedded_column_table"
+    assert result.statement_kind is StatementKind.DEPOSIT
+    rows = result.transactions.rows
+    assert [row.amount_minor for row in rows] == [8_500_000, -3_000_000, -200_000]
+    assert [row.balance_minor for row in rows] == [13_500_000, 10_500_000, 10_300_000]
+    assert [row.transaction_date.date().isoformat() for row in rows] == [
+        "2026-09-01",
+        "2026-09-13",
+        "2026-09-14",
+    ]
+    assert rows[1].description == "UPI/GREEN HOMES RENT/ okaxis/monthly"
+    assert rows[0].description == "SALARY ACME PAYROLL"
+    assert result.source_evidence[rows[2].fingerprint] == {
+        "format": "pdf",
+        "page": 1,
+        "text_y": 640,
+    }
+
+
+def test_debit_credit_header_without_row_markers_falls_back_to_columns() -> None:
+    content = positioned_statement_pdf(
+        (40, 700, "Txn Date"),
+        (110, 700, "Description"),
+        (380, 700, "Debit"),
+        (450, 700, "Credit"),
+        (520, 700, "Balance"),
+        (40, 680, "05-10-2026"),
+        (110, 680, "Coffee Roasters"),
+        (380, 680, "45.50"),
+        (520, 680, "954.50"),
+        (40, 666, "06-10-2026"),
+        (110, 666, "Refund from store"),
+        (450, 666, "20.00"),
+        (520, 666, "974.50"),
+    )
+    result = parse_statement(
+        content,
+        filename="current.pdf",
+        claimed_content_type="application/pdf",
+        mapping=_mapping(),
+    )
+    assert result.extraction_method == "embedded_column_table"
+    assert [row.amount_minor for row in result.transactions.rows] == [-4_550, 2_000]
+    assert [row.balance_minor for row in result.transactions.rows] == [95_450, 97_450]
+
+
+def test_pdf_without_any_recognizable_table_is_rejected() -> None:
+    content = positioned_statement_pdf((40, 700, "Quarterly newsletter"), (40, 680, "Hello"))
+    with pytest.raises(StatementValidationError) as failure:
+        parse_statement(
+            content,
+            filename="newsletter.pdf",
+            claimed_content_type="application/pdf",
+            mapping=_mapping(),
+        )
+    assert failure.value.code == "PDF_TABLE_NOT_FOUND"
 
 
 def test_golden_pdf_matches_golden_csv_truth_counts() -> None:

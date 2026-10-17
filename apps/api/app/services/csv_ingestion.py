@@ -13,7 +13,27 @@ from app.engines.categorization import classify_transaction, normalize_merchant
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_UPLOAD_ROWS = 10_000
-SUPPORTED_DATE_FORMATS = {"%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"}
+# Ordered by preference: statements in the primary market are day-first, so day-first
+# formats win when a column's values are equally valid under a month-first reading.
+SUPPORTED_DATE_FORMATS = (
+    "%Y-%m-%d",
+    "%d/%m/%Y",
+    "%d/%m/%y",
+    "%d-%m-%Y",
+    "%d-%m-%y",
+    "%d.%m.%Y",
+    "%d-%b-%Y",
+    "%d-%b-%y",
+    "%d %b %Y",
+    "%d %b %y",
+    "%d/%b/%Y",
+    "%d %B %Y",
+    "%d-%B-%Y",
+    "%b %d, %Y",
+    "%Y/%m/%d",
+    "%m/%d/%Y",
+    "%m/%d/%y",
+)
 
 
 class CSVColumnMapping(BaseModel):
@@ -23,6 +43,7 @@ class CSVColumnMapping(BaseModel):
     description: str | None = None
     transaction_id: str | None = None
     signed_amount: str | None = None
+    direction: str | None = None
     debit: str | None = None
     credit: str | None = None
     currency: str | None = None
@@ -37,6 +58,8 @@ class CSVColumnMapping(BaseModel):
             raise ValueError("configure signed_amount or debit/credit columns, but not both")
         if split and (self.debit is None or self.credit is None):
             raise ValueError("both debit and credit columns are required")
+        if self.direction is not None and not signed:
+            raise ValueError("a direction column requires a signed_amount column")
         if self.date_format not in SUPPORTED_DATE_FORMATS:
             raise ValueError("date_format must be explicit and supported")
         return self
@@ -91,9 +114,20 @@ def content_sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+_CURRENCY_MARKERS = re.compile(r"(?i)₹|inr|rs\.?|\$|€|£")
+_DIRECTION_SUFFIX = re.compile(r"(?i)\s*(cr|dr)\.?$")
+_BLANK_AMOUNTS = {"", "-", "--", "nil"}
+_DEBIT_TOKENS = {"dr", "debit", "d", "withdrawal", "db"}
+_CREDIT_TOKENS = {"cr", "credit", "c", "deposit"}
+
+
 def _money_to_minor(raw: str, *, field: str, allow_blank: bool = False) -> int | None:
-    value = raw.strip().replace(",", "")
-    if not value:
+    value = raw.strip()
+    direction = _DIRECTION_SUFFIX.search(value)
+    if direction:
+        value = value[: direction.start()]
+    value = _CURRENCY_MARKERS.sub("", value).replace(",", "").replace(" ", "")
+    if value.casefold() in _BLANK_AMOUNTS:
         if allow_blank:
             return None
         raise ValueError(f"{field} is required")
@@ -108,7 +142,32 @@ def _money_to_minor(raw: str, *, field: str, allow_blank: bool = False) -> int |
     if not amount.is_finite() or not isinstance(exponent, int) or exponent < -2:
         raise ValueError(f"{field} must have at most two decimal places")
     minor = int(amount * 100)
+    if direction:
+        return abs(minor) if direction.group(1).casefold() == "cr" else -abs(minor)
     return -minor if negative_parentheses else minor
+
+
+def parse_direction(raw: str) -> int | None:
+    """Return +1 for a credit marker, -1 for a debit marker, and None otherwise."""
+    token = re.sub(r"[^a-z]", "", raw.casefold())
+    if token in _CREDIT_TOKENS:
+        return 1
+    if token in _DEBIT_TOKENS:
+        return -1
+    return None
+
+
+def parse_statement_date(raw: str, date_format: str) -> datetime:
+    value = raw.strip().strip("'\"")
+    try:
+        return datetime.strptime(value, date_format)
+    except ValueError:
+        # Exports often append a time ("01/04/2025 10:42:11"); the date part is authoritative.
+        words = value.split()
+        width = len(date_format.split())
+        if len(words) > width:
+            return datetime.strptime(" ".join(words[:width]), date_format)
+        raise
 
 
 def _signed_amount(row: dict[str, str], mapping: CSVColumnMapping) -> int:
@@ -116,11 +175,19 @@ def _signed_amount(row: dict[str, str], mapping: CSVColumnMapping) -> int:
         value = _money_to_minor(row.get(mapping.signed_amount, ""), field="amount")
         if value is None:
             raise ValueError("amount is required")
+        if mapping.direction:
+            sign = parse_direction(row.get(mapping.direction, ""))
+            if sign is None:
+                raise ValueError("direction must be debit or credit")
+            return sign * abs(value)
         return value
     if not mapping.debit or not mapping.credit:
         raise ValueError("debit and credit mappings are required")
     debit = _money_to_minor(row.get(mapping.debit, ""), field="debit", allow_blank=True)
     credit = _money_to_minor(row.get(mapping.credit, ""), field="credit", allow_blank=True)
+    # Many exports print 0.00 in the unused column; a zero is not a second movement.
+    debit = debit or None
+    credit = credit or None
     if debit is not None and credit is not None:
         raise ValueError("row cannot contain both debit and credit")
     if debit is None and credit is None:
@@ -176,6 +243,8 @@ def parse_csv(content: bytes, mapping: CSVColumnMapping) -> ParseResult:
     required.add(mapping.signed_amount or mapping.debit or "")
     if mapping.credit:
         required.add(mapping.credit)
+    if mapping.direction:
+        required.add(mapping.direction)
     missing = sorted(required.difference(reader.fieldnames))
     if missing:
         raise ValueError(f"CSV is missing mapped columns: {', '.join(missing)}")
@@ -190,7 +259,7 @@ def parse_csv(content: bytes, mapping: CSVColumnMapping) -> ParseResult:
         if total > MAX_UPLOAD_ROWS:
             raise ValueError("CSV exceeds the 10,000 row limit")
         try:
-            transaction_date = datetime.strptime(row[mapping.date].strip(), mapping.date_format)
+            transaction_date = parse_statement_date(row[mapping.date], mapping.date_format)
             amount_minor = _signed_amount(row, mapping)
             if amount_minor == 0:
                 raise ValueError("zero-value transactions are not accepted")

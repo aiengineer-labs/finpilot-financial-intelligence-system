@@ -18,6 +18,7 @@ type Props = {
   scenario: Scenario | null;
   run: AgentRun | null;
   uploadResult: UploadResult | null;
+  spendingOnly: boolean;
   busy: boolean;
   onUpload: (file: File) => void;
   onLoadSample: () => void;
@@ -32,11 +33,11 @@ const WORKERS: Array<{ icon: IconName; title: string; label: string; detail: str
   { icon: "governance", title: "Financial verifier", label: "Release gate", detail: "Recompute every amount and withhold advice that cannot be proven from stored evidence.", kind: "code" }
 ];
 
-export function LiveDemo({ insights, rowCount, completed, snapshot, forecast, scenario, run, uploadResult, busy, onUpload, onLoadSample, onRun, onOpenConsole, onOpenHow }: Props) {
+export function LiveDemo({ insights, rowCount, completed, snapshot, forecast, scenario, run, uploadResult, spendingOnly, busy, onUpload, onLoadSample, onRun, onOpenConsole, onOpenHow }: Props) {
   const [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const latest = insights.balances.at(-1)?.balance ?? null;
-  const status = run ? (run.verification_status === "accept" ? "Verified" : "Withheld") : forecast ? "Forecast ready" : rowCount ? "Ready to run" : "Awaiting statement";
+  const status = run ? (run.verification_status === "accept" ? "Verified" : "Withheld") : forecast ? "Forecast ready" : snapshot?.analysis_mode === "spending" ? "Spending analysed" : rowCount ? "Ready to run" : "Awaiting statement";
 
   function drop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -50,13 +51,13 @@ export function LiveDemo({ insights, rowCount, completed, snapshot, forecast, sc
       <Panel className={`demo-hero ${rowCount ? "has-data" : "awaiting-data"}`}>
         <div className="demo-hero-copy">
           <div className="live-label"><span />LIVE · {rowCount ? "UPLOADED STATEMENT" : "EMPTY WORKSPACE"}</div>
-          <h2>{rowCount ? "Your statement is ready for a verified decision." : "Upload a bank CSV or PDF. FinPilot will show every decision."}</h2>
+          <h2>{rowCount ? "Your statement is ready for a verified decision." : "Upload a bank or credit-card statement. FinPilot will show every decision."}</h2>
           <p>{rowCount ? "The values below come from persisted rows in this workspace. Run the workflow to cross deterministic engines, Mesh specialists, an adversarial critic and an independent release gate." : "Nothing is preloaded and no result is hardcoded. Your selected file passes through validation, categorization, financial engines and the inspectable agent workflow."}</p>
 
           {!rowCount ? (
             <div className={`demo-upload ${dragging ? "dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={drop}>
               <span className="demo-upload-icon"><Icon name="upload" size={24} /></span>
-              <div><b>Drop your bank statement</b><small>CSV or text-based PDF · up to 5 MiB · no bank credentials</small></div>
+              <div><b>Drop a bank or card statement</b><small>CSV or text-based PDF · up to 5 MiB · no bank credentials</small></div>
               <button className="btn btn-primary" onClick={() => input.current?.click()} disabled={busy}><Icon name={busy ? "refresh" : "doc"} size={14} className={busy ? "spin" : ""} />{busy ? "Checking…" : "Choose statement"}</button>
               <input ref={input} type="file" accept=".csv,.pdf,text/csv,application/pdf" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) onUpload(file); event.target.value = ""; }} />
             </div>
@@ -64,7 +65,7 @@ export function LiveDemo({ insights, rowCount, completed, snapshot, forecast, sc
             <div className="button-row">
               <button className="btn btn-primary btn-lg" onClick={onRun} disabled={busy}>
                 <Icon name={busy ? "refresh" : "play"} size={16} className={busy ? "spin" : ""} />
-                {busy ? "FinPilot is working…" : run ? "Run again" : "Process uploaded statement"}
+                {busy ? "FinPilot is working…" : run ? "Run again" : spendingOnly ? "Analyse spending" : "Process uploaded statement"}
               </button>
               <button className="btn btn-glass btn-lg" onClick={() => input.current?.click()} disabled={busy}><Icon name="upload" size={16} />Upload another statement</button>
               <input ref={input} type="file" accept=".csv,.pdf,text/csv,application/pdf" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) onUpload(file); event.target.value = ""; }} />
@@ -79,11 +80,11 @@ export function LiveDemo({ insights, rowCount, completed, snapshot, forecast, sc
         </div>
 
         <div className="demo-summary glass-thin" aria-live="polite">
-          <div><small>Known balance</small><strong>{latest === null ? "—" : money(latest)}</strong><span>{latest === null ? "No source balance loaded" : `Source-provided · ${insights.lastDay}`}</span></div>
+          <div><small>Known balance</small><strong>{latest === null ? "—" : money(latest)}</strong><span>{latest === null ? (spendingOnly ? "Card or balance-free statement" : "No source balance loaded") : `Source-provided · ${insights.lastDay}`}</span></div>
           <div className="demo-summary-grid">
             <span><small>Ledger</small><b>{rowCount ? `${rowCount} rows` : "Empty"}</b></span>
             <span><small>Savings</small><b>{rowCount ? `${insights.rate}%` : "—"}</b></span>
-            <span><small>30-day low</small><b>{forecast ? compactMoney(scenario?.minimum_balance_minor ?? forecast.minimum_balance_minor) : "Pending"}</b></span>
+            <span><small>30-day low</small><b>{forecast ? compactMoney(scenario?.minimum_balance_minor ?? forecast.minimum_balance_minor) : spendingOnly ? "Needs balance" : "Pending"}</b></span>
             <span><small>Verdict</small><b>{status}</b></span>
           </div>
           {uploadResult && <div className="demo-import-result"><Icon name="check" size={14} /><span><b>{uploadResult.filename}</b><small>{uploadResult.source_format.toUpperCase()} verified · {uploadResult.accepted_rows} accepted · {uploadResult.duplicate_rows} duplicate · {uploadResult.rejected_rows} rejected</small></span></div>}

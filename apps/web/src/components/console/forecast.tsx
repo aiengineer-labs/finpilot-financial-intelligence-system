@@ -21,25 +21,29 @@ type Props = {
   snapshot: Snapshot | null;
   forecast: Forecast | null;
   scenario: Scenario | null;
+  spendingOnly: boolean;
   canRun: boolean;
   busy: boolean;
   onRunAnalysis: () => void;
   onAskAdvisor: () => void;
 };
 
-export function ForecastView({ config, setConfig, snapshot, forecast, scenario, canRun, busy, onRunAnalysis, onAskAdvisor }: Props) {
+export function ForecastView({ config, setConfig, snapshot, forecast, scenario, spendingOnly, canRun, busy, onRunAnalysis, onAskAdvisor }: Props) {
   const minDate = config.asOf ? addDays(config.asOf, 1) : undefined;
   const maxDate = config.asOf ? addDays(config.asOf, config.horizon) : undefined;
+  const spendingSnapshot = snapshot?.analysis_mode === "spending" ? snapshot : null;
   return (
     <div className="view-grid">
       <Panel className="span-12 composer">
-        <PanelHeader eyebrow="RUN CONFIGURATION" title="Compose a projection" subtitle="Integer minor-unit engine · no model call · every run is versioned" icon="calendar" />
+        <PanelHeader eyebrow="RUN CONFIGURATION" title={spendingOnly ? "Analyse spending" : "Compose a projection"} subtitle={spendingOnly ? "Card or balance-free statement · recurrence and anomalies · no balance is invented" : "Integer minor-unit engine · no model call · every run is versioned"} icon="calendar" />
         <div className="composer-grid">
-          <label className="field">Known-balance date<input type="date" value={config.asOf} onChange={(event) => setConfig({ asOf: event.target.value })} /></label>
+          <label className="field">{spendingOnly ? "Analysis date" : "Known-balance date"}<input type="date" value={config.asOf} onChange={(event) => setConfig({ asOf: event.target.value })} /></label>
+          {!spendingOnly && <>
           <div className="field"><span>Horizon</span><Segmented label="Forecast horizon" value={config.horizon} onChange={(horizon) => setConfig({ horizon })} options={[{ value: 30, label: "30 days" }, { value: 60, label: "60 days" }, { value: 90, label: "90 days" }]} /></div>
           <div className="field switch-field"><span>What-if purchase</span><div><Switch checked={config.scenarioEnabled} onChange={(scenarioEnabled) => setConfig({ scenarioEnabled })} label="Include a what-if purchase" /><small>{config.scenarioEnabled ? "Branch from baseline" : "Baseline only"}</small></div></div>
+          </>}
         </div>
-        {config.scenarioEnabled && (
+        {config.scenarioEnabled && !spendingOnly && (
           <div className="composer-grid scenario-grid">
             <div className="field span-all"><span>Presets</span><div className="chip-row">{SCENARIO_PRESETS.map((preset) => <button key={preset.label} type="button" className={`chip ${config.scenarioAmount === preset.amount ? "active" : ""}`} onClick={() => setConfig({ scenarioName: preset.name, scenarioAmount: preset.amount })}>{preset.label}<small>{money(Number(preset.amount) * 100)}</small></button>)}</div></div>
             <label className="field">Scenario name<input value={config.scenarioName} maxLength={120} onChange={(event) => setConfig({ scenarioName: event.target.value })} /></label>
@@ -48,14 +52,14 @@ export function ForecastView({ config, setConfig, snapshot, forecast, scenario, 
           </div>
         )}
         <div className="button-row end">
-          <small className="muted">{config.asOf ? `Projects ${shortDate(addDays(config.asOf, 1))} – ${shortDate(addDays(config.asOf, config.horizon))}` : "Import a statement with balances to choose a date"}</small>
-          <button className="btn btn-glass" onClick={onAskAdvisor} disabled={busy || !forecast}><Icon name="advice" size={14} />Ask advisor</button>
-          <button className="btn btn-primary" onClick={onRunAnalysis} disabled={busy || !canRun}><Icon name="play" size={13} />{busy ? "Calculating…" : "Run analysis"}</button>
+          <small className="muted">{!config.asOf ? "Import a statement to choose a date" : spendingOnly ? `Analyses every row up to ${shortDate(config.asOf)}` : `Projects ${shortDate(addDays(config.asOf, 1))} – ${shortDate(addDays(config.asOf, config.horizon))}`}</small>
+          {!spendingOnly && <button className="btn btn-glass" onClick={onAskAdvisor} disabled={busy || !forecast}><Icon name="advice" size={14} />Ask advisor</button>}
+          <button className="btn btn-primary" onClick={onRunAnalysis} disabled={busy || !canRun}><Icon name="play" size={13} />{busy ? "Calculating…" : spendingOnly ? "Analyse spending" : "Run analysis"}</button>
         </div>
       </Panel>
 
-      {!forecast || !snapshot ? (
-        <Panel className="span-12"><EmptyState icon="forecast" title="No forecast yet">Select a known-balance date and run the analysis. Missing balances are never inferred.</EmptyState></Panel>
+      {spendingSnapshot ? <SpendingResult snapshot={spendingSnapshot} /> : !forecast || !snapshot ? (
+        <Panel className="span-12"><EmptyState icon="forecast" title={spendingOnly ? "No spending analysis yet" : "No forecast yet"}>{spendingOnly ? "This statement has no running balance (for example a credit-card statement), so FinPilot analyses spending, recurrence and anomalies. Cash forecasting needs a bank statement with balances." : "Select a known-balance date and run the analysis. Missing balances are never inferred."}</EmptyState></Panel>
       ) : <ForecastResult snapshot={snapshot} forecast={forecast} scenario={scenario} />}
     </div>
   );
@@ -113,8 +117,34 @@ function ForecastResult({ snapshot, forecast, scenario }: { snapshot: Snapshot; 
         </div>
       </Panel>
 
+      <SnapshotEvidence snapshot={snapshot} recurringTitle="Recurring flows in the projection" />
+    </>
+  );
+}
+
+function SpendingResult({ snapshot }: { snapshot: Snapshot }) {
+  const high = snapshot.anomaly_results.filter((item) => item.severity === "high").length;
+  return (
+    <>
+      <div className="span-12 stat-row">
+        <StatTile icon="doc" label="Rows analysed" value={snapshot.source_transaction_count} detail={`Up to ${longDate(snapshot.as_of)}`} />
+        <StatTile icon="repeat" label="Recurring charges" value={snapshot.recurring_patterns.length} detail="Detected from repeated merchant and date evidence" />
+        <StatTile icon="alert" label="Anomalies" value={snapshot.anomaly_results.length} tone={high ? "bad" : "good"} detail={high ? `${high} high severity` : "No high-severity outliers"} />
+        <StatTile icon="lock" label="Cash forecast" value="Not available" detail="No running balance in this statement" />
+      </div>
+      <Panel className="span-12">
+        <div className="callout info"><Icon name="info" size={16} /><p>This is a <b>spending analysis</b>. The statement carries no running balance (for example a credit-card statement), so FinPilot does not invent one or project cash. Upload a bank statement with balances to enable the forecast and advisor.</p></div>
+      </Panel>
+      <SnapshotEvidence snapshot={snapshot} recurringTitle="Recurring charges and credits" />
+    </>
+  );
+}
+
+function SnapshotEvidence({ snapshot, recurringTitle }: { snapshot: Snapshot; recurringTitle: string }) {
+  return (
+    <>
       <Panel className="span-7">
-        <PanelHeader eyebrow="SCHEDULE INPUTS" title="Recurring flows in the projection" subtitle={`${snapshot.recurring_patterns.length} patterns`} />
+        <PanelHeader eyebrow="RECURRENCE ENGINE" title={recurringTitle} subtitle={`${snapshot.recurring_patterns.length} patterns`} />
         {snapshot.recurring_patterns.length ? (
           <div className="table-wrap"><table className="table compact">
             <thead><tr><th>Merchant</th><th>Cadence</th><th>Confidence</th><th className="num">Typical</th></tr></thead>

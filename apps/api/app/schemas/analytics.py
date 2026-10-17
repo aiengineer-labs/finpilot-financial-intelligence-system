@@ -31,7 +31,8 @@ class SnapshotResponse(BaseModel):
     account_id: UUID
     as_of: date
     currency: str
-    opening_balance_minor: int
+    opening_balance_minor: int | None
+    analysis_mode: Literal["cashflow", "spending"]
     source_transaction_count: int
     source_transaction_ids: list[str]
     input_sha256: str

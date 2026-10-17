@@ -1,6 +1,7 @@
 "use client";
 
-import type { Tenant, View } from "@/lib/types";
+import { humanize } from "@/lib/format";
+import type { Account, Tenant, View } from "@/lib/types";
 import { Icon } from "../ui/icons";
 import { Avatar, Pill, hueFor } from "../ui/primitives";
 import { Brand } from "./brand";
@@ -8,6 +9,10 @@ import { STAGES, type StageId, VIEWS } from "./shared";
 
 type Props = {
   tenant: Tenant;
+  accounts: Account[];
+  activeAccountId: string | undefined;
+  busy: boolean;
+  onSwitchAccount: (accountId: string) => void;
   view: View | null;
   open: boolean;
   badges: Partial<Record<View, number>>;
@@ -16,7 +21,7 @@ type Props = {
   onClose: () => void;
 };
 
-export function Sidebar({ tenant, view, open, badges, completed, onNavigate, onClose }: Props) {
+export function Sidebar({ tenant, accounts, activeAccountId, busy, onSwitchAccount, view, open, badges, completed, onNavigate, onClose }: Props) {
   const groups = ["Workspace", "Assurance", "Learn"] as const;
   const progress = Math.round((completed.size / STAGES.length) * 100);
 
@@ -31,6 +36,15 @@ export function Sidebar({ tenant, view, open, badges, completed, onNavigate, onC
         <Avatar label={tenant.name} hue={hueFor(tenant.name)} />
         <div><b>{tenant.name}</b><small>isolated passwordless workspace</small></div>
       </div>
+
+      {accounts.length > 1 && (
+        <label className="field account-field">
+          <span>Active account</span>
+          <select value={activeAccountId} disabled={busy} onChange={(event) => onSwitchAccount(event.target.value)}>
+            {accounts.map((account) => <option key={account.id} value={account.id}>{account.account_type === "unknown" ? account.name : `${account.name} · ${humanize(account.account_type)}`}</option>)}
+          </select>
+        </label>
+      )}
 
       <nav className="nav">
         {groups.map((group) => (

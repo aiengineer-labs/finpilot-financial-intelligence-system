@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import TenantContext, tenant_context
@@ -23,7 +23,11 @@ from app.schemas.transactions import (
 )
 from app.services.csv_ingestion import MAX_UPLOAD_BYTES, CSVColumnMapping
 from app.services.statement_ingestion import StatementValidationError
-from app.services.transaction_import import find_account, import_transactions
+from app.services.transaction_import import (
+    AccountTypeMismatchError,
+    find_account,
+    import_transactions,
+)
 
 router = APIRouter(tags=["transactions"])
 
@@ -46,6 +50,7 @@ def _upload_response(upload, replayed: bool) -> UploadResponse:  # type: ignore[
         page_count=upload.page_count,
         warnings=upload.warnings,
         processing_duration_ms=upload.processing_duration_ms,
+        statement_kind=upload.statement_kind,
         replayed=replayed,
     )
 
@@ -58,7 +63,8 @@ async def upload_transactions(
     mapping_json: Annotated[str, Form(alias="mapping")],
     file: Annotated[UploadFile, File()],
 ) -> UploadResponse:
-    if await find_account(session, context.tenant_id, account_id) is None:
+    account = await find_account(session, context.tenant_id, account_id)
+    if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
     if not file.filename:
         raise HTTPException(
@@ -76,12 +82,21 @@ async def upload_transactions(
         upload, replayed = await import_transactions(
             session,
             tenant_id=context.tenant_id,
-            account_id=account_id,
+            account=account,
             filename=file.filename,
             claimed_content_type=file.content_type,
             content=content,
             mapping=mapping,
         )
+    except AccountTypeMismatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "statement_kind": exc.statement_kind.value,
+            },
+        ) from exc
     except StatementValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -117,8 +132,11 @@ async def list_transactions(
     session: Annotated[AsyncSession, Depends(get_session)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    account_id: UUID | None = None,
 ) -> TransactionPage:
     scope = Transaction.tenant_id == context.tenant_id
+    if account_id is not None:
+        scope = and_(scope, Transaction.account_id == account_id)
     total = await session.scalar(select(func.count()).select_from(Transaction).where(scope))
     rows = await session.scalars(
         select(Transaction)

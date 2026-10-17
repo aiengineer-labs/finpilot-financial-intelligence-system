@@ -226,3 +226,131 @@ async def test_versioned_forecast_and_immutable_scenario_are_tenant_scoped(
         },
     )
     assert cross_tenant_review.status_code == 404
+
+
+UI_MAPPING = {
+    "date": "Date",
+    "date_format": "%d/%m/%Y",
+    "debit": "Debit",
+    "credit": "Credit",
+    "merchant": "Merchant",
+    "description": "Description",
+    "transaction_id": "Transaction ID",
+    "currency": "Currency",
+    "balance": "Balance",
+}
+
+
+async def test_card_and_bank_statements_are_routed_and_analysed_by_kind(
+    client: AsyncClient,
+) -> None:
+    token, tenant, _ = await _identity(client, "statements@example.com", "Statement Mix")
+    headers = {"Authorization": f"Bearer {token}", "X-Tenant-ID": tenant}
+    primary = await client.post(
+        "/api/v1/accounts",
+        headers=headers,
+        json={"name": "Primary account", "currency": "INR", "external_reference": "primary"},
+    )
+    card_id = primary.json()["id"]
+    assert primary.json()["account_type"] == "unknown"
+
+    card_csv = b"""Synthetic Card Services
+Credit Card Number,XXXX XXXX XXXX 0001
+Transaction Date,Transaction Details,Amount (INR)
+01-Jul-2026,Streaming Service,499.00
+01-Aug-2026,Streaming Service,499.00
+01-Sep-2026,Streaming Service,499.00
+01-Oct-2026,Streaming Service,499.00
+05-Oct-2026,Grocery Market,"2,150.00"
+06-Oct-2026,Grocery Market refund,150.00 Cr
+"""
+    uploaded = await client.post(
+        f"/api/v1/accounts/{card_id}/transaction-uploads",
+        headers=headers,
+        data={"mapping": json.dumps(UI_MAPPING)},
+        files={"file": ("card.csv", card_csv, "text/csv")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["statement_kind"] == "credit_card"
+    assert uploaded.json()["accepted_rows"] == 6
+    accounts = (await client.get("/api/v1/accounts", headers=headers)).json()
+    assert accounts[0]["account_type"] == "credit_card"
+
+    snapshot = await client.post(
+        "/api/v1/analytics/snapshots",
+        headers=headers,
+        json={"account_id": card_id, "as_of": "2026-10-06"},
+    )
+    assert snapshot.status_code == 201, snapshot.text
+    assert snapshot.json()["analysis_mode"] == "spending"
+    assert snapshot.json()["opening_balance_minor"] is None
+    assert snapshot.json()["source_transaction_count"] == 6
+    assert any(
+        pattern["merchant"] == "streaming service"
+        for pattern in snapshot.json()["recurring_patterns"]
+    )
+    forecast = await client.post(
+        "/api/v1/analytics/forecasts",
+        headers=headers,
+        json={"snapshot_id": snapshot.json()["id"], "horizon_days": 30},
+    )
+    assert forecast.status_code == 422
+    assert "Cash forecasting is unavailable" in forecast.json()["detail"]
+
+    bank_csv = b"""Date,Narration,Withdrawal Amt.,Deposit Amt.,Closing Balance
+01/10/2026,Salary ACME,,"1,000.00","5,000.00"
+02/10/2026,Coffee Roasters,50.00,,"4,750.00"
+02/10/2026,Grocery Market,200.00,,"4,800.00"
+"""
+    mismatch = await client.post(
+        f"/api/v1/accounts/{card_id}/transaction-uploads",
+        headers=headers,
+        data={"mapping": json.dumps(UI_MAPPING)},
+        files={"file": ("bank.csv", bank_csv, "text/csv")},
+    )
+    assert mismatch.status_code == 409, mismatch.text
+    assert mismatch.json()["detail"]["code"] == "ACCOUNT_TYPE_MISMATCH"
+    assert mismatch.json()["detail"]["statement_kind"] == "deposit"
+
+    bank = await client.post(
+        "/api/v1/accounts",
+        headers=headers,
+        json={
+            "name": "Bank account",
+            "currency": "INR",
+            "external_reference": "bank",
+            "account_type": "deposit",
+        },
+    )
+    bank_id = bank.json()["id"]
+    imported = await client.post(
+        f"/api/v1/accounts/{bank_id}/transaction-uploads",
+        headers=headers,
+        data={"mapping": json.dumps(UI_MAPPING)},
+        files={"file": ("bank.csv", bank_csv, "text/csv")},
+    )
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["statement_kind"] == "deposit"
+
+    card_rows = await client.get(
+        f"/api/v1/transactions?account_id={card_id}&limit=200", headers=headers
+    )
+    bank_rows = await client.get(
+        f"/api/v1/transactions?account_id={bank_id}&limit=200", headers=headers
+    )
+    all_rows = await client.get("/api/v1/transactions?limit=200", headers=headers)
+    assert card_rows.json()["total"] == 6
+    assert bank_rows.json()["total"] == 3
+    assert all_rows.json()["total"] == 9
+    assert {row["account_id"] for row in bank_rows.json()["items"]} == {bank_id}
+
+    cash = await client.post(
+        "/api/v1/analytics/snapshots",
+        headers=headers,
+        json={"account_id": bank_id, "as_of": "2026-10-02"},
+    )
+    assert cash.status_code == 201, cash.text
+    assert cash.json()["analysis_mode"] == "cashflow"
+    # The chain 5,000 -> 4,800 (groceries) -> 4,750 (coffee) closes the day, whatever the
+    # storage order of the two same-day rows.
+    assert cash.json()["opening_balance_minor"] == 475_000

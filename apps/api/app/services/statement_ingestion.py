@@ -21,6 +21,16 @@ from app.services.csv_ingestion import (
     ParseResult,
     parse_csv,
 )
+from app.services.statement_layout import (
+    HEADER_SCAN_ROWS,
+    assign_roles,
+    canonicalize_csv,
+    column_role,
+    has_card_markers,
+    is_transaction_header,
+    numeric_date_order,
+    parse_flexible_date,
+)
 
 MAX_PDF_PAGES = 25
 MAX_PDF_OBJECTS = 25_000
@@ -29,7 +39,8 @@ MAX_POSITIONED_TEXT_FRAGMENTS = 100_000
 PDF_PARSER_NAME = "pypdf-text-table"
 PDF_PARSER_VERSION = "2"
 CSV_PARSER_NAME = "python-csv"
-CSV_PARSER_VERSION = "1"
+CSV_PARSER_VERSION = "2"
+MAX_CONTINUATION_LINES = 4
 
 _PDF_HEADER = b"%PDF-"
 _ACTIVE_PDF_KEYS = {
@@ -59,6 +70,12 @@ class StatementFormat(StrEnum):
     PDF = "pdf"
 
 
+class StatementKind(StrEnum):
+    UNKNOWN = "unknown"
+    DEPOSIT = "deposit"
+    CREDIT_CARD = "credit_card"
+
+
 class StatementValidationError(ValueError):
     """A stable, user-safe failure raised before ledger mutation."""
 
@@ -70,6 +87,8 @@ class StatementValidationError(ValueError):
 @dataclass(frozen=True)
 class ParsedStatement:
     format: StatementFormat
+    statement_kind: StatementKind
+    mapping: CSVColumnMapping
     detected_content_type: str
     parser_name: str
     parser_version: str
@@ -116,8 +135,9 @@ def detect_statement_format(content: bytes) -> StatementFormat:
         raise StatementValidationError(
             "UNSUPPORTED_FILE_TYPE", "The file is neither a UTF-8 CSV nor a PDF"
         ) from exc
-    first_nonempty = next((line for line in text.splitlines() if line.strip()), "")
-    if not first_nonempty or not any(separator in first_nonempty for separator in (",", "\t", ";")):
+    # Bank exports may open with a few title lines before the delimited table.
+    leading = [line for line in text.splitlines()[:HEADER_SCAN_ROWS] if line.strip()]
+    if not any(separator in line for line in leading for separator in (",", "\t", ";", "|")):
         raise StatementValidationError(
             "UNSUPPORTED_FILE_TYPE", "The file is neither a recognizable CSV nor a PDF"
         )
@@ -152,7 +172,18 @@ def _required_headers(mapping: CSVColumnMapping) -> set[str]:
     required = {mapping.date, mapping.merchant, mapping.signed_amount or mapping.debit or ""}
     if mapping.credit:
         required.add(mapping.credit)
+    if mapping.direction:
+        required.add(mapping.direction)
     return required
+
+
+def _first_csv_row(content: bytes) -> set[str]:
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("CSV must be UTF-8 encoded") from exc
+    first = next(csv.reader(io.StringIO(text, newline="")), [])
+    return {cell.strip() for cell in first}
 
 
 def _delimited_pdf_table_as_csv(
@@ -214,8 +245,50 @@ _YEAR_PATTERN = re.compile(
 )
 
 
+def _reads_downward(fragments: list[_PositionedText]) -> bool:
+    """Return True when a larger text-matrix y is higher on the page (the PDF default).
+
+    Some generators (for example HTML-to-PDF renderers) flip the coordinate system with a
+    transformation matrix, so the text matrix can run either way. A table header always
+    precedes its rows, which fixes the reading direction for the page.
+    """
+
+    headers = [
+        fragment.y
+        for fragment in fragments
+        if fragment.text.casefold() == "date" or fragment.text.casefold().endswith(" date")
+    ]
+    amounts = [
+        fragment.y
+        for fragment in fragments
+        if _AMOUNT_PATTERN.fullmatch(fragment.text.replace(" ", ""))
+    ]
+    if not headers or not amounts:
+        return True
+    header_y = sum(headers) / len(headers)
+    below = sum(1 for y in amounts if y < header_y)
+    return below * 2 >= len(amounts)
+
+
 def _normalized_fragment(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _statement_kind(page_texts: list[str], transactions: ParseResult) -> StatementKind:
+    normalized = " ".join(page_texts).casefold()
+    credit_card_markers = (
+        "credit card",
+        "credit limit",
+        "minimum payment due",
+        "total payment due",
+    )
+    if "credit card" in normalized and any(
+        marker in normalized for marker in credit_card_markers[1:]
+    ):
+        return StatementKind.CREDIT_CARD
+    if any(row.balance_minor is not None for row in transactions.rows):
+        return StatementKind.DEPOSIT
+    return StatementKind.UNKNOWN
 
 
 def _extract_positioned_text(
@@ -296,6 +369,7 @@ def _aligned_pdf_table_as_csv(
     source_locations: list[dict[str, int | str]] = []
     saw_supported_header = False
     for page_fragments in pages:
+        downward = _reads_downward(page_fragments)
         joined_text = " ".join(fragment.text.casefold() for fragment in page_fragments)
         has_date_header = bool(re.search(r"\bdate\b", joined_text))
         has_detail_header = "transaction details" in joined_text or "description" in joined_text
@@ -340,7 +414,10 @@ def _aligned_pdf_table_as_csv(
                 if fragment.x <= date_column_limit
             ]
             raw_date = " ".join(
-                fragment.text for fragment in sorted(date_fragments, key=lambda item: item.y)
+                fragment.text
+                for fragment in sorted(
+                    date_fragments, key=lambda item: -item.y if downward else item.y
+                )
             )
             statement_date = _format_statement_date(raw_date, mapping.date_format)
             if statement_date is None:
@@ -355,7 +432,10 @@ def _aligned_pdf_table_as_csv(
             details = _normalized_fragment(
                 " ".join(
                     fragment.text
-                    for fragment in sorted(detail_fragments, key=lambda item: (item.y, item.x))
+                    for fragment in sorted(
+                        detail_fragments,
+                        key=lambda item: (-item.y if downward else item.y, item.x),
+                    )
                 )
             )
             if not details:
@@ -389,6 +469,320 @@ def _aligned_pdf_table_as_csv(
             "No supported transaction table was found. The PDF needs recognizable date, "
             "transaction-details, amount, and debit/credit columns",
         )
+    if not rows:
+        raise StatementValidationError(
+            "PDF_NO_TRANSACTIONS", "The PDF transaction table does not contain any readable rows"
+        )
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue().encode("utf-8"), source_locations
+
+
+_PDF_AMOUNT = re.compile(r"(?i)^(?:₹|rs\.?|inr)?[-+]?\(?\d[\d,]*\.\d{2}\)?(?:cr|dr)?\.?$")
+_DIRECTION_SUFFIX = re.compile(r"(?i)(cr|dr)\.?$")
+_MOVEMENT_ROLES = ("debit", "credit", "amount")
+_NUMERIC_ROLES = (*_MOVEMENT_ROLES, "balance")
+
+
+@dataclass(frozen=True)
+class _PdfColumn:
+    left: float
+    center: float
+
+
+@dataclass
+class _PdfLine:
+    page: int
+    y: float
+    font_size: float
+    date_parts: list[str]
+    details: list[str]
+    amounts: dict[str, str]
+    direction: str | None
+
+
+def _estimated_center(fragment: _PositionedText) -> float:
+    # Helvetica-like glyphs average roughly half an em in width.
+    return fragment.x + len(fragment.text) * fragment.font_size * 0.25
+
+
+def _pdf_lines(fragments: list[_PositionedText]) -> list[list[_PositionedText]]:
+    """Group fragments into visual lines in reading order (top of the page first)."""
+
+    downward = _reads_downward(fragments)
+    lines: list[list[_PositionedText]] = []
+    for fragment in sorted(fragments, key=lambda item: (-item.y if downward else item.y, item.x)):
+        if lines:
+            anchor = lines[-1][0]
+            tolerance = max(min(anchor.font_size, fragment.font_size) * 0.5, 2.0)
+            if abs(anchor.y - fragment.y) <= tolerance:
+                lines[-1].append(fragment)
+                continue
+        lines.append([fragment])
+    return [sorted(line, key=lambda item: item.x) for line in lines]
+
+
+def _line_labels(line: list[_PositionedText]) -> list[tuple[str, float, float]]:
+    """Join same-line header words ("Transaction" + "Details") into column labels."""
+
+    labels: list[tuple[str, float, float]] = []
+    previous_end = float("-inf")
+    for fragment in line:
+        end = fragment.x + len(fragment.text) * fragment.font_size * 0.5
+        adjacent = labels and fragment.x - previous_end <= fragment.font_size * 1.5
+        # Two complete labels ("Withdrawal Amt." "Deposit Amt.") stay separate columns.
+        if adjacent and (column_role(labels[-1][0]) is None or column_role(fragment.text) is None):
+            text, left, _ = labels[-1]
+            labels[-1] = (f"{text} {fragment.text}", left, (left + end) / 2)
+        else:
+            labels.append((fragment.text, fragment.x, _estimated_center(fragment)))
+        previous_end = end
+    return labels
+
+
+def _header_columns(
+    lines: list[list[_PositionedText]], index: int
+) -> tuple[dict[str, _PdfColumn], int] | None:
+    labels = _line_labels(lines[index])
+    candidates = [(labels, 1)]
+    if index + 1 < len(lines):
+        below = lines[index + 1]
+        gap = abs(lines[index][0].y - below[0].y)
+        below_is_data = any(
+            _PDF_AMOUNT.fullmatch(fragment.text.replace(" ", "")) for fragment in below
+        )
+        if gap <= max(lines[index][0].font_size * 2.5, 12.0) and not below_is_data:
+            # Two-line headers such as "Withdrawal" over "Amount (INR)".
+            merged = list(labels)
+            for text, left, center in _line_labels(below):
+                nearest = min(
+                    range(len(merged)), key=lambda position: abs(merged[position][2] - center)
+                )
+                if abs(merged[nearest][2] - center) <= 40:
+                    label, label_left, label_center = merged[nearest]
+                    merged[nearest] = (f"{label} {text}", label_left, label_center)
+                else:
+                    merged.append((text, left, center))
+            candidates.append((merged, 2))
+    for candidate, consumed in candidates:
+        roles = assign_roles([label for label, _, _ in candidate])
+        if is_transaction_header(roles):
+            names = {position: role for role, position in roles.items()}
+            # Unused columns (Chq./Ref.No., Value Dt) still bound their neighbours' text.
+            return (
+                {
+                    names.get(position, f"other{position}"): _PdfColumn(left=left, center=center)
+                    for position, (_, left, center) in enumerate(candidate)
+                },
+                consumed,
+            )
+    return None
+
+
+def _classify_pdf_line(
+    line: list[_PositionedText], columns: dict[str, _PdfColumn]
+) -> _PdfLine:
+    numeric = {role: column for role, column in columns.items() if role in _NUMERIC_ROLES}
+    ordered = sorted(columns.items(), key=lambda item: item[1].left)
+    parsed = _PdfLine(
+        page=line[0].page,
+        y=line[0].y,
+        font_size=line[0].font_size,
+        date_parts=[],
+        details=[],
+        amounts={},
+        direction=None,
+    )
+    for fragment in line:
+        compact = fragment.text.replace(" ", "")
+        if numeric and _PDF_AMOUNT.fullmatch(compact):
+            center = _estimated_center(fragment)
+            nearest = min(numeric, key=lambda name: abs(numeric[name].center - center))
+            parsed.amounts.setdefault(nearest, compact)
+            continue
+        if compact.casefold().rstrip(".") in {"cr", "dr"}:
+            parsed.direction = compact
+            continue
+        role: str | None = None
+        for name, column in ordered:
+            if column.left <= fragment.x + 4:
+                role = name
+        if role == "date":
+            parsed.date_parts.append(fragment.text)
+        elif role in {"details", "merchant"}:
+            parsed.details.append(fragment.text)
+        elif role == "direction":
+            parsed.direction = fragment.text
+    return parsed
+
+
+def _pdf_date(raw: str, *, day_first: bool) -> datetime | None:
+    parsed = parse_flexible_date(raw, day_first=day_first)
+    if parsed is not None:
+        return parsed
+    formatted = _format_statement_date(raw, "%Y-%m-%d")
+    return datetime.strptime(formatted, "%Y-%m-%d") if formatted else None
+
+
+def _movement(line: _PdfLine, card_statement: bool) -> tuple[str, int] | None:
+    """Return the unsigned amount and its sign (+1 credit, -1 debit) for one table row."""
+
+    for role in _MOVEMENT_ROLES:
+        token = line.amounts.get(role)
+        if token is None:
+            continue
+        sign: int | None = {"debit": -1, "credit": 1}.get(role)
+        suffix = _DIRECTION_SUFFIX.search(token)
+        if suffix:
+            token = token[: suffix.start()]
+            sign = sign or (1 if suffix.group(1).casefold() == "cr" else -1)
+        token = re.sub(r"(?i)₹|rs\.?|inr", "", token)
+        if token.startswith("(") and token.endswith(")"):
+            token, sign = token[1:-1], sign or -1
+        if token[:1] in {"-", "+"}:
+            sign = sign or (-1 if token[0] == "-" else 1)
+            token = token[1:]
+        if sign is None and line.direction:
+            sign = 1 if line.direction.casefold().startswith("c") else -1
+        if sign is None:
+            # Card statements list charges unsigned; bank amounts without a marker are inflows.
+            sign = -1 if card_statement else 1
+        return token, sign
+    return None
+
+
+def _columnar_pdf_table_as_csv(
+    pages: list[list[_PositionedText]], page_texts: list[str], mapping: CSVColumnMapping
+) -> tuple[bytes, list[dict[str, int | str]]]:
+    """Read bank tables laid out as Date | Narration | Withdrawal | Deposit | Balance.
+
+    Columns are located from header labels and fragment coordinates, so the adapter does
+    not depend on a bank name or page size. Wrapped narration lines join their row.
+    """
+
+    card_statement = has_card_markers(" ".join(page_texts))
+    columns: dict[str, _PdfColumn] | None = None
+    centered: bool | None = None
+    anchors: list[tuple[_PdfLine, str]] = []
+    for page_fragments in pages:
+        lines = _pdf_lines(page_fragments)
+        start = 0
+        for index in range(len(lines)):
+            found = _header_columns(lines, index)
+            if found is not None:
+                columns, consumed = found
+                start = index + consumed
+                break
+        if columns is None:
+            continue
+        classified = [_classify_pdf_line(line, columns) for line in lines[start:]]
+        is_movement = [
+            any(role in line.amounts for role in _MOVEMENT_ROLES) for line in classified
+        ]
+        page_anchors: dict[int, str] = {}
+        for position, line in enumerate(classified):
+            if not is_movement[position]:
+                continue
+            # A date split over lines ("08 Jun" / "'25") may borrow from a text-only neighbour.
+            above = (
+                classified[position - 1].date_parts
+                if position > 0 and not is_movement[position - 1]
+                else []
+            )
+            below = (
+                classified[position + 1].date_parts
+                if position + 1 < len(classified) and not is_movement[position + 1]
+                else []
+            )
+            candidates = [
+                line.date_parts,
+                line.date_parts + below,
+                above + line.date_parts,
+                above + line.date_parts + below,
+            ]
+            for parts in candidates:
+                raw_date = " ".join(parts)
+                if parts and _pdf_date(raw_date, day_first=True) is not None:
+                    page_anchors[position] = raw_date
+                    break
+        if not page_anchors:
+            continue
+        positions = sorted(page_anchors)
+        if centered is None:
+            # Vertically centered rows put wrapped text above the amount line as well.
+            first = classified[positions[0]]
+            centered = any(
+                line.details and not line.amounts
+                for line in classified[: positions[0]]
+                if abs(line.y - first.y) <= first.font_size * 2.2
+            )
+        attached: dict[int, int] = {}
+        for position, line in enumerate(classified):
+            if position in page_anchors or line.amounts or not line.details:
+                continue
+            if centered:
+                target = min(positions, key=lambda anchor: abs(classified[anchor].y - line.y))
+            else:
+                earlier = [anchor for anchor in positions if anchor < position]
+                if not earlier:
+                    continue
+                target = earlier[-1]
+            count = attached.get(target, 0)
+            distance = abs(classified[target].y - line.y)
+            if count >= MAX_CONTINUATION_LINES or distance > line.font_size * 2.4 * (count + 1):
+                continue
+            attached[target] = count + 1
+            anchor_line = classified[target]
+            if position < target:
+                anchor_line.details[:0] = line.details
+            else:
+                anchor_line.details.extend(line.details)
+        anchors.extend((classified[position], page_anchors[position]) for position in positions)
+
+    if columns is None:
+        raise StatementValidationError(
+            "PDF_TABLE_NOT_FOUND",
+            "No supported transaction table was found. The PDF needs recognizable date, "
+            "description, and amount or withdrawal/deposit columns",
+        )
+    day_first = numeric_date_order([raw_date for _, raw_date in anchors])
+    fieldnames = [mapping.date, mapping.merchant]
+    for optional in (
+        mapping.description,
+        mapping.signed_amount,
+        mapping.debit,
+        mapping.credit,
+        mapping.currency,
+        mapping.balance,
+    ):
+        if optional and optional not in fieldnames:
+            fieldnames.append(optional)
+    rows: list[dict[str, str]] = []
+    source_locations: list[dict[str, int | str]] = []
+    for line, raw_date in anchors:
+        parsed_date = _pdf_date(raw_date, day_first=day_first)
+        movement = _movement(line, card_statement)
+        details = _normalized_fragment(" ".join(line.details))
+        if parsed_date is None or movement is None or not details:
+            continue
+        amount, sign = movement
+        row = {field: "" for field in fieldnames}
+        row[mapping.date] = parsed_date.strftime(mapping.date_format)
+        row[mapping.merchant] = details[:255]
+        if mapping.description:
+            row[mapping.description] = details
+        if mapping.currency:
+            row[mapping.currency] = mapping.default_currency
+        if mapping.signed_amount:
+            row[mapping.signed_amount] = amount if sign > 0 else f"-{amount}"
+        elif mapping.debit and mapping.credit:
+            row[mapping.credit if sign > 0 else mapping.debit] = amount
+        if mapping.balance and "balance" in line.amounts:
+            row[mapping.balance] = line.amounts["balance"]
+        rows.append(row)
+        source_locations.append({"format": "pdf", "page": line.page, "text_y": round(line.y)})
     if not rows:
         raise StatementValidationError(
             "PDF_NO_TRANSACTIONS", "The PDF transaction table does not contain any readable rows"
@@ -492,12 +886,23 @@ def _parse_pdf(content: bytes, mapping: CSVColumnMapping) -> ParsedStatement:
     except StatementValidationError as exc:
         if exc.code != "PDF_TABLE_NOT_FOUND":
             raise
-        csv_content, source_locations = _aligned_pdf_table_as_csv(positioned_pages, mapping)
-        extraction_method = "embedded_aligned_columns"
-        warnings.append("Parsed a visually aligned transaction table")
+        try:
+            csv_content, source_locations = _aligned_pdf_table_as_csv(positioned_pages, mapping)
+            extraction_method = "embedded_aligned_columns"
+            warnings.append("Parsed a visually aligned transaction table")
+        except StatementValidationError as aligned_exc:
+            if aligned_exc.code not in {"PDF_TABLE_NOT_FOUND", "PDF_NO_TRANSACTIONS"}:
+                raise
+            csv_content, source_locations = _columnar_pdf_table_as_csv(
+                positioned_pages, page_texts, mapping
+            )
+            extraction_method = "embedded_column_table"
+            warnings.append("Parsed a column-aligned transaction table")
     transactions = parse_csv(csv_content, mapping)
     return ParsedStatement(
         format=StatementFormat.PDF,
+        statement_kind=_statement_kind(page_texts, transactions),
+        mapping=mapping,
         detected_content_type="application/pdf",
         parser_name=PDF_PARSER_NAME,
         parser_version=PDF_PARSER_VERSION,
@@ -528,21 +933,42 @@ def parse_statement(
     )
     if detected_format is StatementFormat.PDF:
         return _parse_pdf(content, mapping)
+    effective_mapping = mapping
+    warnings: list[str] = []
+    card_statement = False
     try:
-        transactions = parse_csv(content, mapping)
+        if _required_headers(mapping).issubset(_first_csv_row(content)):
+            transactions = parse_csv(content, mapping)
+            source_rows = [row.source_row for row in transactions.rows]
+        else:
+            # Real bank and card exports name their columns differently; recognize them.
+            table = canonicalize_csv(content, mapping.default_currency)
+            effective_mapping = table.mapping
+            warnings = table.warnings
+            card_statement = table.card_statement
+            transactions = parse_csv(table.content, table.mapping)
+            source_rows = [table.source_rows[row.source_row - 2] for row in transactions.rows]
     except ValueError as exc:
         raise StatementValidationError("INVALID_CSV", str(exc)) from exc
+    if card_statement:
+        statement_kind = StatementKind.CREDIT_CARD
+    elif any(row.balance_minor is not None for row in transactions.rows):
+        statement_kind = StatementKind.DEPOSIT
+    else:
+        statement_kind = StatementKind.UNKNOWN
     return ParsedStatement(
         format=StatementFormat.CSV,
+        statement_kind=statement_kind,
+        mapping=effective_mapping,
         detected_content_type="text/csv",
         parser_name=CSV_PARSER_NAME,
         parser_version=CSV_PARSER_VERSION,
         extraction_method="structured_text",
         page_count=None,
-        warnings=[],
+        warnings=warnings,
         source_evidence={
-            row.fingerprint: {"format": "csv", "row": row.source_row}
-            for row in transactions.rows
+            row.fingerprint: {"format": "csv", "row": source_row}
+            for row, source_row in zip(transactions.rows, source_rows, strict=True)
         },
         transactions=transactions,
     )

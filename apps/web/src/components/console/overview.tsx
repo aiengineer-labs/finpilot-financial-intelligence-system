@@ -11,6 +11,7 @@ type Props = {
   insights: Insights;
   transactions: Transaction[];
   snapshot: Snapshot | null;
+  spendingOnly: boolean;
   hasAccount: boolean;
   busy: boolean;
   onNavigate: (view: View) => void;
@@ -18,7 +19,7 @@ type Props = {
   onRunAnalysis: () => void;
 };
 
-export function Overview({ insights, transactions, snapshot, hasAccount, busy, onNavigate, onLoadSample, onRunAnalysis }: Props) {
+export function Overview({ insights, transactions, snapshot, spendingOnly, hasAccount, busy, onNavigate, onLoadSample, onRunAnalysis }: Props) {
   if (!transactions.length) return <Onboarding hasAccount={hasAccount} busy={busy} onLoadSample={onLoadSample} onNavigate={onNavigate} />;
 
   const latest = insights.balances[insights.balances.length - 1];
@@ -31,7 +32,7 @@ export function Overview({ insights, transactions, snapshot, hasAccount, busy, o
   return (
     <div className="view-grid">
       <Panel className="span-8 hero-balance">
-        <PanelHeader eyebrow="LATEST KNOWN BALANCE" title={latest ? <span className="hero-figure">{money(latest.balance)}</span> : "No source balance"} subtitle={latest ? `Source-provided running balance on ${longDate(latest.day)}` : "This statement carries no balance column; FinPilot never infers one."} actions={first && latest && first.day !== latest.day ? <Pill tone={latest.balance >= first.balance ? "good" : "bad"} icon={latest.balance >= first.balance ? "arrowUpRight" : "arrowDownRight"}>{signedMoney(latest.balance - first.balance)} since {shortDate(first.day)}</Pill> : undefined} />
+        <PanelHeader eyebrow="LATEST KNOWN BALANCE" title={latest ? <span className="hero-figure">{money(latest.balance)}</span> : "No source balance"} subtitle={latest ? `Source-provided running balance on ${longDate(latest.day)}` : spendingOnly ? "Card or balance-free statement: spending, recurrence and anomalies are analysed; a balance is never inferred." : "This statement carries no balance column; FinPilot never infers one."} actions={first && latest && first.day !== latest.day ? <Pill tone={latest.balance >= first.balance ? "good" : "bad"} icon={latest.balance >= first.balance ? "arrowUpRight" : "arrowDownRight"}>{signedMoney(latest.balance - first.balance)} since {shortDate(first.day)}</Pill> : undefined} />
         {insights.balances.length > 1 && <LineChart height={210} ariaLabel="Daily closing balance from the imported statement" days={insights.balances.map((point) => point.day)} series={[{ id: "balance", label: "Closing balance", values: insights.balances.map((point) => point.balance), color: "var(--viz-1)", area: true }]} />}
       </Panel>
 
