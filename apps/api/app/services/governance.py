@@ -37,15 +37,20 @@ def artifact_content_sha256(value: dict[str, Any]) -> str:
 
 
 def _artifact_specs(settings: Settings) -> tuple[tuple[str, str, str, dict[str, Any]], ...]:
+    model_id = settings.mesh_model or "not-configured"
+    effort = settings.mesh_reasoning_effort
     return (
         (
             "model",
             "mesh-advice-model",
-            settings.mesh_model or "not-configured",
+            f"{model_id}@reasoning-{effort or 'disabled'}@schema-v1",
             {
-                "model_id": settings.mesh_model or "not-configured",
+                "model_id": model_id,
                 "gateway": "https://api.meshapi.ai/v1",
                 "direct_provider_fallback": False,
+                "reasoning_effort": effort or "disabled",
+                "temperature": "provider_default" if effort else 0,
+                "response_format": "strict_json_schema",
             },
         ),
         ("prompt", "advice-prompts", PROMPT_VERSION, {"template_version": PROMPT_VERSION}),
@@ -349,11 +354,27 @@ async def ensure_governance_baseline(
                 status=EvaluationGateStatus.NOT_RUN,
                 code_version=RELEASE_CODE_VERSION,
                 model_id=settings.mesh_model or None,
-                failures=["External Mesh egress approval pending"],
+                failures=["Model security evaluation has not been run for this release"],
                 reviewer_disposition="release_blocked",
                 duration_ms=0,
             )
         )
+    else:
+        pending_model_evaluation = await session.scalar(
+            select(EvaluationRun).where(
+                EvaluationRun.tenant_id == tenant_id,
+                EvaluationRun.dataset_id == "mesh-model-redteam",
+                EvaluationRun.status == EvaluationGateStatus.NOT_RUN,
+            )
+        )
+        if pending_model_evaluation is not None and pending_model_evaluation.failures == [
+            "External Mesh egress approval pending"
+        ]:
+            # This seed text described the development environment, not the durable gate state.
+            # Reword it without pretending that the model-based evaluation has passed.
+            pending_model_evaluation.failures = [
+                "Model security evaluation has not been run for this release"
+            ]
     await session.flush()
 
 

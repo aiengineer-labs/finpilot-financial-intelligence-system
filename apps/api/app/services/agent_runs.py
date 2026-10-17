@@ -25,7 +25,7 @@ from app.engines.spending import money_values
 from app.graphs.advice import AdviceWorkflow
 from app.graphs.manifest import GRAPH_VERSION, PROMPT_VERSION, VERIFIER_VERSION
 from app.guardrails.service import GuardrailViolation, get_model_guardrails
-from app.integrations.mesh import MeshClient
+from app.integrations.mesh import MeshClient, MeshProviderError
 from app.security.input_policy import InputDecision, assess_untrusted_text
 from app.services.analytics import snapshot_spending_summary
 from app.services.governance import (
@@ -33,6 +33,18 @@ from app.services.governance import (
     create_review_case,
     ensure_governance_baseline,
 )
+
+MAX_CONTEXT_ANOMALIES = 10
+
+
+def _strongest_anomalies(anomalies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the model context small: only the most unusual transactions are worth citing."""
+
+    def strength(anomaly: dict[str, Any]) -> int:
+        score = anomaly.get("robust_score_milli")
+        return abs(score) if isinstance(score, int) else 0
+
+    return sorted(anomalies, key=strength, reverse=True)[:MAX_CONTEXT_ANOMALIES]
 
 
 def _safe_label(text: str) -> str:
@@ -110,7 +122,8 @@ async def _context(
     allowed_amounts: set[int] = set()
     if snapshot.opening_balance_minor is not None:
         allowed_amounts.add(snapshot.opening_balance_minor)
-    for anomaly in snapshot.anomaly_results:
+    anomalies = _strongest_anomalies(snapshot.anomaly_results)
+    for anomaly in anomalies:
         transaction_id = anomaly.get("transaction_id")
         if isinstance(transaction_id, str):
             evidence_ids.append(transaction_id)
@@ -190,7 +203,8 @@ async def _context(
             "as_of": snapshot.as_of.isoformat(),
             "opening_balance_minor": snapshot.opening_balance_minor,
             "source_transaction_count": snapshot.source_transaction_count,
-            "anomalies": snapshot.anomaly_results,
+            "anomalies": anomalies,
+            "anomaly_total_count": len(snapshot.anomaly_results),
             "engine_version": snapshot.engine_version,
         },
         "spending": spending,
@@ -264,6 +278,15 @@ async def execute_advice(
             guardrail_events=prepared.events,
         )
     except Exception as exc:
+        details: dict[str, Any] = {"error_type": type(exc).__name__}
+        failure = "agent execution failed safely"
+        if isinstance(exc, MeshProviderError):
+            details["provider_status"] = exc.status_code
+            failure = f"{failure}: {exc.reason}"
+        elif isinstance(exc, GuardrailViolation):
+            rule = exc.rule or "unknown"
+            details["guardrail_rule"] = rule
+            failure = f"{failure}: the output guardrail blocked model text ({rule})"
         execution.status = AgentRunStatus.FAILED
         execution.final_response = "The agent run failed safely before producing advice."
         session.add(
@@ -274,11 +297,11 @@ async def execute_advice(
                 node="runtime",
                 event_type="failure",
                 summary="Agent execution failed closed",
-                details={"error_type": type(exc).__name__},
+                details=details,
             )
         )
         await session.commit()
-        raise RuntimeError("agent execution failed safely") from exc
+        raise RuntimeError(failure) from exc
 
     status = VerificationStatus(state["verification_status"])
     execution.intent = state["intent"]

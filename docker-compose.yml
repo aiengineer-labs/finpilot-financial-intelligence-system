@@ -27,6 +27,7 @@ services:
       ALLOWED_ORIGINS: '["http://localhost:3000"]'
       MESH_API_KEY: ${MESH_API_KEY:-}
       MESH_MODEL: ${MESH_MODEL:-}
+      MESH_REASONING_EFFORT: ${MESH_REASONING_EFFORT:-low}
       CRON_SECRET: ${CRON_SECRET:-}
       DIGEST_DISPATCH_LIMIT: ${DIGEST_DISPATCH_LIMIT:-25}
     depends_on:

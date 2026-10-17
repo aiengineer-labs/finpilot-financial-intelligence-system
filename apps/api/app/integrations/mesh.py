@@ -19,7 +19,8 @@ class MeshCompletion(BaseModel):
     id: str
     model: str
     choices: list[dict[str, Any]]
-    usage: dict[str, int] | None = None
+    # Mesh nests token details and reports cost_usd as a number, so usage is not all integers.
+    usage: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -29,12 +30,54 @@ class MeshResult:
     guardrails: dict[str, str] | None = None
 
 
+class MeshProviderError(RuntimeError):
+    """Mesh refused or could not serve a request; the reason is fixed text, never upstream data."""
+
+    def __init__(self, reason: str, status_code: int | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.status_code = status_code
+
+
+def _provider_reason(status_code: int) -> str:
+    if status_code == 402:
+        return "the Mesh account has insufficient balance for this model"
+    if status_code in (401, 403):
+        return "Mesh rejected the configured API key"
+    if status_code == 404:
+        return "Mesh does not serve the configured model"
+    if status_code == 429:
+        return "Mesh rate-limited the request"
+    if status_code >= 500:
+        return "Mesh is temporarily unavailable"
+    return f"Mesh rejected the request (HTTP {status_code})"
+
+
 class MeshTransport(Protocol):
     async def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]: ...
 
 
 class MeshOutputGuard(Protocol):
     async def process_output(self, text: str) -> str: ...
+
+
+def _strict_json_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Return an OpenAI-compatible strict schema for a Pydantic response model."""
+    schema = model.model_json_schema()
+
+    def close_objects(value: Any) -> None:
+        if isinstance(value, dict):
+            if value.get("type") == "object" and isinstance(value.get("properties"), dict):
+                value["additionalProperties"] = False
+                value["required"] = list(value["properties"])
+            for nested in value.values():
+                close_objects(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                close_objects(nested)
+
+    close_objects(schema)
+    return schema
 
 
 class HttpMeshTransport:
@@ -48,8 +91,14 @@ class HttpMeshTransport:
         )
 
     async def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        response = await self._client.post(path, json=payload)
-        response.raise_for_status()
+        try:
+            response = await self._client.post(path, json=payload)
+        except httpx.TimeoutException as exc:
+            raise MeshProviderError("Mesh did not respond in time") from exc
+        except httpx.TransportError as exc:
+            raise MeshProviderError("Mesh could not be reached") from exc
+        if response.is_error:
+            raise MeshProviderError(_provider_reason(response.status_code), response.status_code)
         return response.json()  # type: ignore[no-any-return]
 
 
@@ -68,14 +117,38 @@ class MeshClient:
         self._transport = transport or HttpMeshTransport(settings)
         self._output_guard = output_guard
 
-    async def complete(self, messages: list[MeshMessage], *, max_tokens: int = 800) -> MeshResult:
+    async def complete(
+        self,
+        messages: list[MeshMessage],
+        *,
+        max_tokens: int = 800,
+        json_output: bool = False,
+        response_schema: type[BaseModel] | None = None,
+    ) -> MeshResult:
         started = time.monotonic()
-        payload = {
+        payload: dict[str, Any] = {
             "model": self._settings.mesh_model,
             "messages": [message.model_dump() for message in messages],
             "max_tokens": max_tokens,
-            "temperature": 0,
         }
+        effort = self._settings.mesh_reasoning_effort
+        if effort is None:
+            payload["temperature"] = 0
+        else:
+            # Reasoning models accept only their default temperature. Omitting it keeps the
+            # request eligible for Mesh's 24-hour response cache.
+            payload["reasoning"] = {"effort": effort}
+        if response_schema is not None:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": response_schema.__name__,
+                    "strict": True,
+                    "schema": _strict_json_schema(response_schema),
+                },
+            }
+        elif json_output:
+            payload["response_format"] = {"type": "json_object"}
         raw = await self._transport.post("/chat/completions", payload)
         completion = MeshCompletion.model_validate(raw)
         guardrail_metadata: dict[str, str] | None = None

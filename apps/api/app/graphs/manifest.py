@@ -3,7 +3,7 @@
 from typing import Final, Literal, TypedDict
 
 GRAPH_VERSION: Final = "advice-graph-v2"
-PROMPT_VERSION: Final = "advice-prompts-v2"
+PROMPT_VERSION: Final = "advice-prompts-v4"
 VERIFIER_VERSION: Final = "financial-verifier-v1"
 
 NodeKind = Literal["input", "guardrail", "deterministic", "store", "mesh", "verifier", "output"]
