@@ -4,7 +4,7 @@ import { addDays, compactMoney, dayDiff, exactMoney, humanize, longDate, money, 
 function readable(assumption: string) {
   return assumption.replace(/(-?\d+) minor units(\/day)?/g, (_, value: string, perDay?: string) => `${exactMoney(Number(value))}${perDay ? " per day" : ""}`);
 }
-import type { Forecast, Scenario, Snapshot } from "@/lib/types";
+import type { Forecast, Scenario, Snapshot, SpendingSummary } from "@/lib/types";
 import { type ChartMarker, LineChart } from "../ui/charts";
 import { Icon } from "../ui/icons";
 import { EmptyState, Meter, Panel, PanelHeader, Pill, Segmented, StatTile, Switch } from "../ui/primitives";
@@ -21,25 +21,29 @@ type Props = {
   snapshot: Snapshot | null;
   forecast: Forecast | null;
   scenario: Scenario | null;
+  spendingOnly: boolean;
   canRun: boolean;
   busy: boolean;
   onRunAnalysis: () => void;
   onAskAdvisor: () => void;
 };
 
-export function ForecastView({ config, setConfig, snapshot, forecast, scenario, canRun, busy, onRunAnalysis, onAskAdvisor }: Props) {
+export function ForecastView({ config, setConfig, snapshot, forecast, scenario, spendingOnly, canRun, busy, onRunAnalysis, onAskAdvisor }: Props) {
   const minDate = config.asOf ? addDays(config.asOf, 1) : undefined;
   const maxDate = config.asOf ? addDays(config.asOf, config.horizon) : undefined;
+  const spendingSnapshot = snapshot?.analysis_mode === "spending" ? snapshot : null;
   return (
     <div className="view-grid">
       <Panel className="span-12 composer">
-        <PanelHeader eyebrow="RUN CONFIGURATION" title="Compose a projection" subtitle="Integer minor-unit engine · no model call · every run is versioned" icon="calendar" />
+        <PanelHeader eyebrow="RUN CONFIGURATION" title={spendingOnly ? "Analyse spending" : "Compose a projection"} subtitle={spendingOnly ? "Card or balance-free statement · recurrence and anomalies · no balance is invented" : "Integer minor-unit engine · no model call · every run is versioned"} icon="calendar" />
         <div className="composer-grid">
-          <label className="field">Known-balance date<input type="date" value={config.asOf} onChange={(event) => setConfig({ asOf: event.target.value })} /></label>
+          <label className="field">{spendingOnly ? "Analysis date" : "Known-balance date"}<input type="date" value={config.asOf} onChange={(event) => setConfig({ asOf: event.target.value })} /></label>
+          {!spendingOnly && <>
           <div className="field"><span>Horizon</span><Segmented label="Forecast horizon" value={config.horizon} onChange={(horizon) => setConfig({ horizon })} options={[{ value: 30, label: "30 days" }, { value: 60, label: "60 days" }, { value: 90, label: "90 days" }]} /></div>
           <div className="field switch-field"><span>What-if purchase</span><div><Switch checked={config.scenarioEnabled} onChange={(scenarioEnabled) => setConfig({ scenarioEnabled })} label="Include a what-if purchase" /><small>{config.scenarioEnabled ? "Branch from baseline" : "Baseline only"}</small></div></div>
+          </>}
         </div>
-        {config.scenarioEnabled && (
+        {config.scenarioEnabled && !spendingOnly && (
           <div className="composer-grid scenario-grid">
             <div className="field span-all"><span>Presets</span><div className="chip-row">{SCENARIO_PRESETS.map((preset) => <button key={preset.label} type="button" className={`chip ${config.scenarioAmount === preset.amount ? "active" : ""}`} onClick={() => setConfig({ scenarioName: preset.name, scenarioAmount: preset.amount })}>{preset.label}<small>{money(Number(preset.amount) * 100)}</small></button>)}</div></div>
             <label className="field">Scenario name<input value={config.scenarioName} maxLength={120} onChange={(event) => setConfig({ scenarioName: event.target.value })} /></label>
@@ -48,14 +52,14 @@ export function ForecastView({ config, setConfig, snapshot, forecast, scenario, 
           </div>
         )}
         <div className="button-row end">
-          <small className="muted">{config.asOf ? `Projects ${shortDate(addDays(config.asOf, 1))} – ${shortDate(addDays(config.asOf, config.horizon))}` : "Import a statement with balances to choose a date"}</small>
-          <button className="btn btn-glass" onClick={onAskAdvisor} disabled={busy || !forecast}><Icon name="advice" size={14} />Ask advisor</button>
-          <button className="btn btn-primary" onClick={onRunAnalysis} disabled={busy || !canRun}><Icon name="play" size={13} />{busy ? "Calculating…" : "Run analysis"}</button>
+          <small className="muted">{!config.asOf ? "Import a statement to choose a date" : spendingOnly ? `Analyses every row up to ${shortDate(config.asOf)}` : `Projects ${shortDate(addDays(config.asOf, 1))} – ${shortDate(addDays(config.asOf, config.horizon))}`}</small>
+          <button className="btn btn-glass" onClick={onAskAdvisor} disabled={busy || (!forecast && !spendingSnapshot)}><Icon name="advice" size={14} />Ask advisor</button>
+          <button className="btn btn-primary" onClick={onRunAnalysis} disabled={busy || !canRun}><Icon name="play" size={13} />{busy ? "Calculating…" : spendingOnly ? "Analyse spending" : "Run analysis"}</button>
         </div>
       </Panel>
 
-      {!forecast || !snapshot ? (
-        <Panel className="span-12"><EmptyState icon="forecast" title="No forecast yet">Select a known-balance date and run the analysis. Missing balances are never inferred.</EmptyState></Panel>
+      {spendingSnapshot ? <SpendingResult snapshot={spendingSnapshot} /> : !forecast || !snapshot ? (
+        <Panel className="span-12"><EmptyState icon="forecast" title={spendingOnly ? "No spending analysis yet" : "No forecast yet"}>{spendingOnly ? "This statement has no running balance (for example a credit-card statement), so FinPilot analyses spending, recurrence and anomalies. Cash forecasting needs a bank statement with balances." : "Select a known-balance date and run the analysis. Missing balances are never inferred."}</EmptyState></Panel>
       ) : <ForecastResult snapshot={snapshot} forecast={forecast} scenario={scenario} />}
     </div>
   );
@@ -113,8 +117,56 @@ function ForecastResult({ snapshot, forecast, scenario }: { snapshot: Snapshot; 
         </div>
       </Panel>
 
+      {snapshot.spending && <SpendingBreakdown spending={snapshot.spending} />}
+      <SnapshotEvidence snapshot={snapshot} recurringTitle="Recurring flows in the projection" />
+    </>
+  );
+}
+
+function SpendingResult({ snapshot }: { snapshot: Snapshot }) {
+  const spending = snapshot.spending;
+  return (
+    <>
+      <div className="span-12 stat-row">
+        <StatTile icon="forecast" label="Projected 30-day spend" value={spending ? compactMoney(spending.projected_30_day_spend_minor) : "—"} detail={spending ? `At the ${spending.period_days}-day statement pace` : "Re-run the analysis"} />
+        <StatTile icon="wallet" label="Average per day" value={spending ? money(spending.average_daily_spend_minor) : "—"} detail={spending ? `${money(spending.total_spend_minor)} spent ${shortDate(spending.period_start)} – ${shortDate(spending.period_end)}` : undefined} />
+        <StatTile icon="bolt" label="Possible monthly saving" value={spending ? money(spending.combined_monthly_saving_minor) : "—"} tone="good" detail={spending ? `${spending.reduction_percent}% less in the top three categories` : undefined} />
+        <StatTile icon="alert" label="Anomalies" value={snapshot.anomaly_results.length} detail={`${snapshot.source_transaction_count} rows analysed`} />
+      </div>
+      <Panel className="span-12">
+        <div className="callout info"><Icon name="info" size={16} /><p>This statement has no running balance (for example a credit-card statement), so the forecast is a <b>spending projection</b> rather than a cash balance. The advisor recommends where to cut back, and every amount it cites is checked against these figures.</p></div>
+      </Panel>
+      {spending && <SpendingBreakdown spending={spending} />}
+      <SnapshotEvidence snapshot={snapshot} recurringTitle="Recurring charges and credits" />
+    </>
+  );
+}
+
+function SpendingBreakdown({ spending }: { spending: SpendingSummary }) {
+  return (
+    <>
       <Panel className="span-7">
-        <PanelHeader eyebrow="SCHEDULE INPUTS" title="Recurring flows in the projection" subtitle={`${snapshot.recurring_patterns.length} patterns`} />
+        <PanelHeader eyebrow="WHERE THE MONEY GOES" title="Top spending categories" subtitle={`Monthly pace and the saving from a ${spending.reduction_percent}% cut`} />
+        {spending.categories.length ? (
+          <div className="table-wrap"><table className="table compact">
+            <thead><tr><th>Category</th><th>Share</th><th className="num">Per month</th><th className="num">Save {spending.reduction_percent}%</th></tr></thead>
+            <tbody>{spending.categories.map((item) => <tr key={item.category}><td><b>{humanize(item.category)}</b><small className="muted"> · {item.transaction_count} payments</small></td><td><div className="provenance"><span>{percentFromBps(item.share_bps)}</span><Meter value={item.share_bps / 100} /></div></td><td className="num">{money(item.monthly_spend_minor)}</td><td className="num positive">{money(item.monthly_saving_minor)}</td></tr>)}</tbody>
+          </table></div>
+        ) : <EmptyState icon="overview" title="No spending in this period" />}
+      </Panel>
+      <Panel className="span-5">
+        <PanelHeader eyebrow="MERCHANTS" title="Biggest merchants" subtitle={spending.savings_rate_bps !== null ? `Savings rate ${percentFromBps(spending.savings_rate_bps)} of inflow` : "Card spending by merchant"} />
+        <ul className="signal-list">{spending.merchants.map((item) => <li key={item.merchant}><span className="signal-icon"><Icon name="wallet" size={15} /></span><div><b>{titleCase(item.merchant)}</b><small className="muted">{item.transaction_count} payments · {money(item.monthly_spend_minor)} per month</small></div><strong>{money(item.spend_minor)}</strong></li>)}</ul>
+      </Panel>
+    </>
+  );
+}
+
+function SnapshotEvidence({ snapshot, recurringTitle }: { snapshot: Snapshot; recurringTitle: string }) {
+  return (
+    <>
+      <Panel className="span-7">
+        <PanelHeader eyebrow="RECURRENCE ENGINE" title={recurringTitle} subtitle={`${snapshot.recurring_patterns.length} patterns`} />
         {snapshot.recurring_patterns.length ? (
           <div className="table-wrap"><table className="table compact">
             <thead><tr><th>Merchant</th><th>Cadence</th><th>Confidence</th><th className="num">Typical</th></tr></thead>

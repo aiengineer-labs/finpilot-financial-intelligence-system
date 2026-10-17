@@ -1,16 +1,35 @@
 from pathlib import Path
+from time import perf_counter
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import (
+    AccountType,
     FinancialAccount,
     Transaction,
     TransactionUpload,
     UploadStatus,
 )
-from app.services.csv_ingestion import CSVColumnMapping, ParseResult, content_sha256, parse_csv
+from app.services.csv_ingestion import CSVColumnMapping, content_sha256
+from app.services.statement_ingestion import (
+    ParsedStatement,
+    StatementValidationError,
+    parse_statement,
+)
+
+
+class AccountTypeMismatchError(StatementValidationError):
+    """A statement belongs to a different kind of account than the upload target."""
+
+    def __init__(self, statement_kind: AccountType, account_type: AccountType) -> None:
+        super().__init__(
+            "ACCOUNT_TYPE_MISMATCH",
+            f"This {statement_kind.value.replace('_', ' ')} statement does not belong in a "
+            f"{account_type.value.replace('_', ' ')} account",
+        )
+        self.statement_kind = statement_kind
 
 
 async def find_account(
@@ -27,12 +46,30 @@ async def import_transactions(
     session: AsyncSession,
     *,
     tenant_id: UUID,
-    account_id: UUID,
+    account: FinancialAccount,
     filename: str,
+    claimed_content_type: str | None,
     content: bytes,
     mapping: CSVColumnMapping,
 ) -> tuple[TransactionUpload, bool]:
+    account_id = account.id
     checksum = content_sha256(content)
+    started_at = perf_counter()
+    statement: ParsedStatement = parse_statement(
+        content,
+        filename=filename,
+        claimed_content_type=claimed_content_type,
+        mapping=mapping,
+    )
+    detected_account_type = {
+        "deposit": AccountType.DEPOSIT,
+        "credit_card": AccountType.CREDIT_CARD,
+    }.get(statement.statement_kind.value)
+    if detected_account_type is not None:
+        if account.account_type is AccountType.UNKNOWN:
+            account.account_type = detected_account_type
+        elif account.account_type is not detected_account_type:
+            raise AccountTypeMismatchError(detected_account_type, account.account_type)
     existing_upload = await session.scalar(
         select(TransactionUpload).where(
             TransactionUpload.tenant_id == tenant_id,
@@ -41,9 +78,13 @@ async def import_transactions(
         )
     )
     if existing_upload is not None:
+        if detected_account_type is not None:
+            existing_upload.statement_kind = statement.statement_kind.value
+            await session.commit()
+            await session.refresh(existing_upload)
         return existing_upload, True
 
-    parsed: ParseResult = parse_csv(content, mapping)
+    parsed = statement.transactions
     fingerprints = [row.fingerprint for row in parsed.rows]
     existing_fingerprints: set[str] = set()
     if fingerprints:
@@ -69,8 +110,19 @@ async def import_transactions(
         accepted_rows=accepted_rows,
         rejected_rows=len(parsed.errors),
         duplicate_rows=duplicate_rows,
-        column_mapping=mapping.model_dump(),
+        column_mapping=statement.mapping.model_dump(),
         row_errors=[error.__dict__ for error in parsed.errors],
+        source_format=statement.format.value,
+        claimed_content_type=claimed_content_type,
+        detected_content_type=statement.detected_content_type,
+        byte_size=len(content),
+        parser_name=statement.parser_name,
+        parser_version=statement.parser_version,
+        extraction_method=statement.extraction_method,
+        page_count=statement.page_count,
+        warnings=statement.warnings,
+        processing_duration_ms=max(0, round((perf_counter() - started_at) * 1000)),
+        statement_kind=statement.statement_kind.value,
     )
     session.add(upload)
     await session.flush()
@@ -94,6 +146,7 @@ async def import_transactions(
                 classification_confidence_bps=row.classification_confidence_bps,
                 fingerprint=row.fingerprint,
                 is_excluded_from_cashflow=row.is_excluded_from_cashflow,
+                source_evidence=statement.source_evidence[row.fingerprint],
             )
             for row in parsed.rows
             if row.fingerprint not in existing_fingerprints

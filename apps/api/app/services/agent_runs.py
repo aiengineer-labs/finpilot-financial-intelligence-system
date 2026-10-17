@@ -21,15 +21,13 @@ from app.database.models import (
     StoredForecastPoint,
     VerificationStatus,
 )
-from app.graphs.advice import (
-    GRAPH_VERSION,
-    PROMPT_VERSION,
-    VERIFIER_VERSION,
-    AdviceWorkflow,
-)
+from app.engines.spending import money_values
+from app.graphs.advice import AdviceWorkflow
+from app.graphs.manifest import GRAPH_VERSION, PROMPT_VERSION, VERIFIER_VERSION
 from app.guardrails.service import GuardrailViolation, get_model_guardrails
 from app.integrations.mesh import MeshClient
 from app.security.input_policy import InputDecision, assess_untrusted_text
+from app.services.analytics import snapshot_spending_summary
 from app.services.governance import (
     approved_artifact_lineage,
     create_review_case,
@@ -37,54 +35,81 @@ from app.services.governance import (
 )
 
 
+def _safe_label(text: str) -> str:
+    """Statement-derived labels are untrusted data: bound them and withhold injection text."""
+
+    label = " ".join(text.split())[:48]
+    if assess_untrusted_text(label).decision is InputDecision.BLOCK:
+        return "[withheld label]"
+    return label
+
+
+def _spending_context(summary: dict[str, Any]) -> tuple[dict[str, Any], list[str], set[int]]:
+    """Attach citable evidence ids to the deterministic spending summary."""
+
+    categories = [
+        {**item, "evidence_id": f"category:{item['category']}"} for item in summary["categories"]
+    ]
+    merchants = [
+        {**item, "merchant": _safe_label(str(item["merchant"])), "evidence_id": f"merchant:{index}"}
+        for index, item in enumerate(summary["merchants"], start=1)
+    ]
+    recurring = [
+        {
+            **item,
+            "merchant": _safe_label(str(item["merchant"])),
+            "evidence_id": str(item["pattern_id"]),
+        }
+        for item in summary["recurring_charges"]
+    ]
+    context = {
+        **summary,
+        "evidence_id": "spending_summary",
+        "categories": categories,
+        "merchants": merchants,
+        "recurring_charges": recurring,
+    }
+    evidence = ["spending_summary"] + [
+        str(item["evidence_id"]) for item in (*categories, *merchants, *recurring)
+    ]
+    return context, evidence, money_values(summary)
+
+
 async def _context(
     session: AsyncSession,
     *,
     tenant_id: UUID,
-    forecast_id: UUID,
+    forecast_id: UUID | None,
+    snapshot_id: UUID | None,
     scenario_id: UUID | None,
-) -> tuple[StoredForecast, CalculationSnapshot, ScenarioRun | None, dict[str, Any]]:
-    forecast = await session.scalar(
-        select(StoredForecast).where(
-            StoredForecast.id == forecast_id, StoredForecast.tenant_id == tenant_id
+) -> tuple[StoredForecast | None, CalculationSnapshot, ScenarioRun | None, dict[str, Any]]:
+    forecast: StoredForecast | None = None
+    if forecast_id is not None:
+        forecast = await session.scalar(
+            select(StoredForecast).where(
+                StoredForecast.id == forecast_id, StoredForecast.tenant_id == tenant_id
+            )
         )
-    )
-    if forecast is None:
-        raise LookupError("forecast not found")
+        if forecast is None:
+            raise LookupError("forecast not found")
+        snapshot_id = forecast.snapshot_id
+    elif scenario_id is not None:
+        raise ValueError("a scenario requires its forecast")
+    if snapshot_id is None:
+        raise ValueError("advice requires a forecast or a snapshot")
     snapshot = await session.scalar(
         select(CalculationSnapshot).where(
-            CalculationSnapshot.id == forecast.snapshot_id,
+            CalculationSnapshot.id == snapshot_id,
             CalculationSnapshot.tenant_id == tenant_id,
         )
     )
     if snapshot is None:
         raise LookupError("snapshot not found")
-    points = list(
-        await session.scalars(
-            select(StoredForecastPoint)
-            .where(StoredForecastPoint.forecast_id == forecast.id)
-            .order_by(StoredForecastPoint.day)
-        )
-    )
-    scenario: ScenarioRun | None = None
-    if scenario_id is not None:
-        scenario = await session.scalar(
-            select(ScenarioRun).where(
-                ScenarioRun.id == scenario_id,
-                ScenarioRun.tenant_id == tenant_id,
-                ScenarioRun.forecast_id == forecast.id,
-            )
-        )
-        if scenario is None:
-            raise LookupError("scenario not found")
 
-    evidence_ids = [str(snapshot.id), str(forecast.id)]
-    allowed_amounts = {
-        snapshot.opening_balance_minor,
-        forecast.opening_balance_minor,
-        forecast.minimum_balance_minor,
-        points[-1].balance_minor if points else forecast.opening_balance_minor,
-    }
+    evidence_ids = [str(snapshot.id)]
+    allowed_amounts: set[int] = set()
+    if snapshot.opening_balance_minor is not None:
+        allowed_amounts.add(snapshot.opening_balance_minor)
     for anomaly in snapshot.anomaly_results:
         transaction_id = anomaly.get("transaction_id")
         if isinstance(transaction_id, str):
@@ -93,32 +118,73 @@ async def _context(
             value = anomaly.get(key)
             if isinstance(value, int):
                 allowed_amounts.add(value)
+
+    forecast_summary: dict[str, Any] | None = None
+    scenario: ScenarioRun | None = None
     scenario_summary: dict[str, Any] | None = None
-    if scenario is not None:
-        evidence_ids.append(str(scenario.id))
-        allowed_amounts.update(
-            {
-                scenario.minimum_balance_minor,
-                scenario.ending_delta_minor,
-                abs(scenario.ending_delta_minor),
-            }
+    if forecast is not None:
+        points = list(
+            await session.scalars(
+                select(StoredForecastPoint)
+                .where(StoredForecastPoint.forecast_id == forecast.id)
+                .order_by(StoredForecastPoint.day)
+            )
         )
-        for shock in scenario.shocks:
-            value = shock.get("amount_minor")
-            if isinstance(value, int):
-                allowed_amounts.update({value, abs(value)})
-        scenario_summary = {
-            "id": str(scenario.id),
-            "name": scenario.name,
-            "minimum_balance_minor": scenario.minimum_balance_minor,
-            "first_shortfall_date": (
-                scenario.first_shortfall_date.isoformat() if scenario.first_shortfall_date else None
-            ),
-            "ending_delta_minor": scenario.ending_delta_minor,
-            "shocks": scenario.shocks,
+        ending_balance = points[-1].balance_minor if points else forecast.opening_balance_minor
+        evidence_ids.append(str(forecast.id))
+        allowed_amounts.update(
+            {forecast.opening_balance_minor, forecast.minimum_balance_minor, ending_balance}
+        )
+        forecast_summary = {
+            "id": str(forecast.id),
+            "horizon_days": forecast.horizon_days,
+            "minimum_balance_minor": forecast.minimum_balance_minor,
+            "ending_balance_minor": ending_balance,
+            "assumptions": forecast.assumptions,
+            "engine_version": forecast.engine_version,
         }
+        if scenario_id is not None:
+            scenario = await session.scalar(
+                select(ScenarioRun).where(
+                    ScenarioRun.id == scenario_id,
+                    ScenarioRun.tenant_id == tenant_id,
+                    ScenarioRun.forecast_id == forecast.id,
+                )
+            )
+            if scenario is None:
+                raise LookupError("scenario not found")
+            evidence_ids.append(str(scenario.id))
+            allowed_amounts.update(
+                {
+                    scenario.minimum_balance_minor,
+                    scenario.ending_delta_minor,
+                    abs(scenario.ending_delta_minor),
+                }
+            )
+            for shock in scenario.shocks:
+                value = shock.get("amount_minor")
+                if isinstance(value, int):
+                    allowed_amounts.update({value, abs(value)})
+            scenario_summary = {
+                "id": str(scenario.id),
+                "name": scenario.name,
+                "minimum_balance_minor": scenario.minimum_balance_minor,
+                "first_shortfall_date": (
+                    scenario.first_shortfall_date.isoformat()
+                    if scenario.first_shortfall_date
+                    else None
+                ),
+                "ending_delta_minor": scenario.ending_delta_minor,
+                "shocks": scenario.shocks,
+            }
+
+    summary = await snapshot_spending_summary(session, tenant_id=tenant_id, snapshot=snapshot)
+    spending, spending_evidence, spending_amounts = _spending_context(summary)
+    evidence_ids.extend(spending_evidence)
+    allowed_amounts.update(spending_amounts)
     context: dict[str, Any] = {
         "currency": snapshot.currency,
+        "analysis_mode": snapshot.analysis_mode,
         "snapshot": {
             "id": str(snapshot.id),
             "as_of": snapshot.as_of.isoformat(),
@@ -127,16 +193,8 @@ async def _context(
             "anomalies": snapshot.anomaly_results,
             "engine_version": snapshot.engine_version,
         },
-        "forecast": {
-            "id": str(forecast.id),
-            "horizon_days": forecast.horizon_days,
-            "minimum_balance_minor": forecast.minimum_balance_minor,
-            "ending_balance_minor": (
-                points[-1].balance_minor if points else forecast.opening_balance_minor
-            ),
-            "assumptions": forecast.assumptions,
-            "engine_version": forecast.engine_version,
-        },
+        "spending": spending,
+        "forecast": forecast_summary,
         "scenario": scenario_summary,
         "scenario_id": str(scenario.id) if scenario else None,
         "evidence_ids": evidence_ids,
@@ -150,16 +208,21 @@ async def execute_advice(
     *,
     tenant_id: UUID,
     user_id: UUID,
-    forecast_id: UUID,
+    forecast_id: UUID | None,
     scenario_id: UUID | None,
     question: str,
     mesh: MeshClient | None = None,
+    snapshot_id: UUID | None = None,
 ) -> AgentExecution:
     assessment = assess_untrusted_text(question)
     if assessment.decision is InputDecision.BLOCK:
         raise ValueError("question was blocked by the prompt-injection policy")
     forecast, snapshot, scenario, context = await _context(
-        session, tenant_id=tenant_id, forecast_id=forecast_id, scenario_id=scenario_id
+        session,
+        tenant_id=tenant_id,
+        forecast_id=forecast_id,
+        snapshot_id=snapshot_id,
+        scenario_id=scenario_id,
     )
     settings = get_settings()
     await ensure_governance_baseline(
@@ -175,7 +238,7 @@ async def execute_advice(
         tenant_id=tenant_id,
         requested_by_user_id=user_id,
         snapshot_id=snapshot.id,
-        forecast_id=forecast.id,
+        forecast_id=forecast.id if forecast else None,
         scenario_run_id=scenario.id if scenario else None,
         question=question,
         intent="pending",
@@ -289,7 +352,7 @@ async def execute_advice(
             source="automatic_verifier_escalation",
             reason="Deterministic financial verification did not accept the final recommendation.",
             risk_level=RiskLevel.HIGH,
-            evidence_ids=[str(snapshot.id), str(forecast.id)],
+            evidence_ids=[str(snapshot.id)] + ([str(forecast.id)] if forecast else []),
             artifact_lineage=artifact_lineage,
             execution_id=execution.id,
         )

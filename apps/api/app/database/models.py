@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
@@ -32,6 +33,12 @@ class UploadStatus(StrEnum):
     COMPLETED = "completed"
     COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
+
+
+class AccountType(StrEnum):
+    UNKNOWN = "unknown"
+    DEPOSIT = "deposit"
+    CREDIT_CARD = "credit_card"
 
 
 class TransactionKind(StrEnum):
@@ -146,6 +153,9 @@ class FinancialAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(120))
     currency: Mapped[str] = mapped_column(String(3), default="INR")
     external_reference: Mapped[str] = mapped_column(String(128))
+    account_type: Mapped[AccountType] = mapped_column(
+        Enum(AccountType), default=AccountType.UNKNOWN
+    )
     tenant: Mapped[Tenant] = relationship(back_populates="accounts")
     uploads: Mapped[list["TransactionUpload"]] = relationship(back_populates="account")
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="account")
@@ -171,6 +181,17 @@ class TransactionUpload(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     duplicate_rows: Mapped[int] = mapped_column(Integer, default=0)
     column_mapping: Mapped[dict[str, str | None]] = mapped_column(JSON)
     row_errors: Mapped[list[dict[str, str | int]]] = mapped_column(JSON, default=list)
+    source_format: Mapped[str] = mapped_column(String(12), default="csv")
+    claimed_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    detected_content_type: Mapped[str] = mapped_column(String(120), default="text/csv")
+    byte_size: Mapped[int] = mapped_column(Integer, default=0)
+    parser_name: Mapped[str] = mapped_column(String(80), default="python-csv")
+    parser_version: Mapped[str] = mapped_column(String(40), default="1")
+    extraction_method: Mapped[str] = mapped_column(String(40), default="structured_text")
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    warnings: Mapped[list[str]] = mapped_column(JSON, default=list)
+    processing_duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    statement_kind: Mapped[str] = mapped_column(String(20), default="unknown")
     tenant: Mapped[Tenant] = relationship(back_populates="uploads")
     account: Mapped[FinancialAccount] = relationship(back_populates="uploads")
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="upload")
@@ -205,6 +226,7 @@ class Transaction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     classification_confidence_bps: Mapped[int] = mapped_column(Integer)
     fingerprint: Mapped[str] = mapped_column(String(64))
     is_excluded_from_cashflow: Mapped[bool] = mapped_column(Boolean, default=False)
+    source_evidence: Mapped[dict[str, int | str]] = mapped_column(JSON, default=dict)
     tenant: Mapped[Tenant] = relationship(back_populates="transactions")
     account: Mapped[FinancialAccount] = relationship(back_populates="transactions")
     upload: Mapped[TransactionUpload] = relationship(back_populates="transactions")
@@ -241,12 +263,15 @@ class CalculationSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     as_of: Mapped[date] = mapped_column(Date)
     currency: Mapped[str] = mapped_column(String(3))
-    opening_balance_minor: Mapped[int] = mapped_column(BigInteger)
+    opening_balance_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    analysis_mode: Mapped[str] = mapped_column(String(20), default="cashflow")
     source_transaction_count: Mapped[int] = mapped_column(Integer)
     source_transaction_ids: Mapped[list[str]] = mapped_column(JSON)
     input_sha256: Mapped[str] = mapped_column(String(64))
     engine_version: Mapped[str] = mapped_column(String(40))
     anomaly_results: Mapped[list[dict[str, str | int]]] = mapped_column(JSON, default=list)
+    # Deterministic spending summary, frozen with the snapshot for audit.
+    spending_summary: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
 
 class StoredRecurringPattern(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -338,7 +363,10 @@ class AgentExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     snapshot_id: Mapped[UUID] = mapped_column(
         ForeignKey("calculation_snapshots.id", ondelete="RESTRICT")
     )
-    forecast_id: Mapped[UUID] = mapped_column(ForeignKey("forecasts.id", ondelete="RESTRICT"))
+    # Null for spending advice grounded only in a snapshot (card or balance-free statements).
+    forecast_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("forecasts.id", ondelete="RESTRICT"), nullable=True
+    )
     scenario_run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("scenario_runs.id", ondelete="RESTRICT"), nullable=True
     )

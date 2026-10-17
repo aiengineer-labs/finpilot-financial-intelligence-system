@@ -2,14 +2,15 @@
 
 import { useState } from "react";
 import { humanize, money, percentFromBps } from "@/lib/format";
-import type { AgentEvent, AgentRun, Forecast } from "@/lib/types";
+import type { AgentEvent, AgentRun } from "@/lib/types";
 import { Icon, type IconName } from "../ui/icons";
 import { EmptyState, Panel, PanelHeader, Pill, Ring, Segmented, StatTile } from "../ui/primitives";
 
 const SUGGESTIONS = [
-  "Can I afford this purchase without jeopardizing my cash buffer?",
+  "Where can I reduce my credit-card spending?",
+  "How can I reduce my spending and save more money each month?",
   "Which recurring costs could I reduce next month?",
-  "How much buffer should I keep before the next salary?"
+  "Can I afford this purchase without jeopardizing my cash buffer?"
 ];
 
 const AGENTS: Array<{ id: string; label: string; icon: IconName; match: (node: string) => boolean }> = [
@@ -21,7 +22,8 @@ const AGENTS: Array<{ id: string; label: string; icon: IconName; match: (node: s
 
 type Props = {
   run: AgentRun | null;
-  forecast: Forecast | null;
+  /** A versioned snapshot or forecast exists to ground the advice. */
+  ready: boolean;
   question: string;
   setQuestion: (value: string) => void;
   visibleEvents: number;
@@ -29,7 +31,7 @@ type Props = {
   onAsk: () => void;
 };
 
-export function AdvisorView({ run, forecast, question, setQuestion, visibleEvents, busy, onAsk }: Props) {
+export function AdvisorView({ run, ready, question, setQuestion, visibleEvents, busy, onAsk }: Props) {
   const seen = run ? run.events.slice(0, visibleEvents) : [];
   return (
     <div className="view-grid">
@@ -39,8 +41,8 @@ export function AdvisorView({ run, forecast, question, setQuestion, visibleEvent
         <div className="question-footer">
           <div className="chip-row">{SUGGESTIONS.map((item) => <button key={item} type="button" className={`chip ${question === item ? "active" : ""}`} onClick={() => setQuestion(item)}>{item}</button>)}</div>
           <div className="button-row">
-            <small className="muted">{forecast ? `${question.length}/1000` : "Run the analysis first — the advisor needs a versioned forecast"}</small>
-            <button className="btn btn-primary" onClick={onAsk} disabled={busy || !forecast || question.trim().length < 3}><Icon name="advice" size={14} />{busy ? "Agents working…" : "Ask advisor"}</button>
+            <small className="muted">{ready ? `${question.length}/1000` : "Run the analysis first — the advisor needs versioned evidence"}</small>
+            <button className="btn btn-primary" onClick={onAsk} disabled={busy || !ready || question.trim().length < 3}><Icon name="advice" size={14} />{busy ? "Agents working…" : "Ask advisor"}</button>
           </div>
         </div>
       </Panel>
@@ -62,7 +64,7 @@ export function AdvisorView({ run, forecast, question, setQuestion, visibleEvent
       </Panel>
 
       {!run ? (
-        <Panel className="span-12"><EmptyState icon="advice" title="No recommendation run yet">The advisor activates only after a versioned forecast exists. Nothing on this page is pre-written.</EmptyState></Panel>
+        <Panel className="span-12"><EmptyState icon="advice" title="No recommendation run yet">The advisor activates after the analysis versions a snapshot: spending evidence for card statements, plus a forecast for bank statements. Nothing on this page is pre-written.</EmptyState></Panel>
       ) : (
         <>
           <Panel className={`span-12 verdict ${run.verification_status === "accept" ? "pass" : "fail"}`}>

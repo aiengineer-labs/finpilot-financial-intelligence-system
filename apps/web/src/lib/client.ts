@@ -1,10 +1,8 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 
 export const SAMPLE_STATEMENT = {
-  path: "/samples/finpilot-synthetic-household-v1.csv",
-  filename: "finpilot-synthetic-household-v1.csv",
-  accountName: "Synthetic household account",
-  externalReference: "synthetic-household-v1"
+  path: "/samples/finpilot-demo-bank-statement.csv",
+  filename: "finpilot-demo-bank-statement.csv"
 } as const;
 
 /** Explicit bank column mapping for the bundled synthetic statement format. */
@@ -14,10 +12,19 @@ export const DEFAULT_MAPPING = JSON.stringify({
   currency: "Currency", balance: "Balance"
 });
 
-type Detail = string | Array<{ msg?: string; loc?: Array<string | number> }> | undefined;
+type Detail = string | { code?: string; message?: string; statement_kind?: string } | Array<{ msg?: string; loc?: Array<string | number> }> | undefined;
+
+/** A failed API call, keeping the stable error code so callers can recover deliberately. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string, readonly statementKind?: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 function describe(detail: Detail, status: number) {
   if (typeof detail === "string") return detail;
+  if (detail && !Array.isArray(detail)) return detail.message ?? detail.code ?? `Request failed (${status})`;
   if (Array.isArray(detail) && detail.length) {
     return detail.map((item) => [item.loc?.slice(1).join("."), item.msg].filter(Boolean).join(": ")).join("; ");
   }
@@ -35,22 +42,12 @@ export async function request<T>(path: string, init: RequestInit = {}, session?:
   try {
     response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   } catch {
-    throw new Error(`FinPilot API is unreachable at ${API_BASE}`);
+    throw new Error("FinPilot API is unavailable through the application gateway");
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { detail?: Detail };
-    throw new Error(describe(body.detail, response.status));
+    const detail = body.detail && typeof body.detail === "object" && !Array.isArray(body.detail) ? body.detail : undefined;
+    throw new ApiError(describe(body.detail, response.status), response.status, detail?.code, detail?.statement_kind);
   }
   return (await response.json()) as T;
-}
-
-/** Synthetic demo credentials are random, in-memory, and never reused across sessions. */
-export function syntheticIdentity() {
-  const bytes = crypto.getRandomValues(new Uint8Array(18));
-  const token = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return {
-    email: `synthetic-demo-${token.slice(0, 10)}@example.com`,
-    password: `fp-${token.slice(10)}`,
-    household: "Synthetic demo household"
-  };
 }

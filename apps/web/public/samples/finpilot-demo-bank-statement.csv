@@ -1,0 +1,31 @@
+Date,Debit,Credit,Merchant,Description,Transaction ID,Currency,Balance
+01/07/2026,,150000.00,Acme Payroll,Monthly salary credit,FP-DEMO-001,INR,150000.00
+02/07/2026,38000.00,,Green Homes Rent,Monthly apartment rent,FP-DEMO-002,INR,112000.00
+03/07/2026,3000.00,,Bigbasket,Weekly grocery order,FP-DEMO-003,INR,109000.00
+05/07/2026,649.00,,Netflix,Netflix subscription,FP-DEMO-004,INR,108351.00
+08/07/2026,2200.00,,Bescom Electricity,Electricity bill,FP-DEMO-005,INR,106151.00
+10/07/2026,500.00,,Uber,Ride to office,FP-DEMO-006,INR,105651.00
+15/07/2026,20000.00,,Hdfc Savings,Self transfer to savings,FP-DEMO-007,INR,85651.00
+01/08/2026,,150000.00,Acme Payroll,Monthly salary credit,FP-DEMO-008,INR,235651.00
+02/08/2026,38000.00,,Green Homes Rent,Monthly apartment rent,FP-DEMO-009,INR,197651.00
+03/08/2026,3200.00,,Bigbasket,Weekly grocery order,FP-DEMO-010,INR,194451.00
+05/08/2026,649.00,,Netflix,Netflix subscription,FP-DEMO-011,INR,193802.00
+08/08/2026,2500.00,,Bescom Electricity,Electricity bill,FP-DEMO-012,INR,191302.00
+10/08/2026,550.00,,Uber,Ride to office,FP-DEMO-013,INR,190752.00
+15/08/2026,20000.00,,Hdfc Savings,Self transfer to savings,FP-DEMO-014,INR,170752.00
+01/09/2026,,150000.00,Acme Payroll,Monthly salary credit,FP-DEMO-015,INR,320752.00
+02/09/2026,38000.00,,Green Homes Rent,Monthly apartment rent,FP-DEMO-016,INR,282752.00
+03/09/2026,3100.00,,Bigbasket,Weekly grocery order,FP-DEMO-017,INR,279652.00
+05/09/2026,649.00,,Netflix,Netflix subscription,FP-DEMO-018,INR,279003.00
+08/09/2026,3500.00,,Bescom Electricity,Electricity bill,FP-DEMO-019,INR,275503.00
+10/09/2026,520.00,,Uber,Ride to office,FP-DEMO-020,INR,274983.00
+15/09/2026,20000.00,,Hdfc Savings,Self transfer to savings,FP-DEMO-021,INR,254983.00
+20/09/2026,12000.00,,Apollo Hospital,Unexpected medical expense,FP-DEMO-022,INR,242983.00
+01/10/2026,,150000.00,Acme Payroll,Monthly salary credit,FP-DEMO-023,INR,392983.00
+02/10/2026,38000.00,,Green Homes Rent,Monthly apartment rent,FP-DEMO-024,INR,354983.00
+03/10/2026,3300.00,,Bigbasket,Weekly grocery order,FP-DEMO-025,INR,351683.00
+05/10/2026,649.00,,Netflix,Netflix subscription,FP-DEMO-026,INR,351034.00
+08/10/2026,2400.00,,Bescom Electricity,Electricity bill,FP-DEMO-027,INR,348634.00
+10/10/2026,510.00,,Uber,Ride to office,FP-DEMO-028,INR,348124.00
+12/10/2026,,1200.00,Amazon,Refund for returned order,FP-DEMO-029,INR,349324.00
+15/10/2026,20000.00,,Hdfc Savings,Self transfer to savings,FP-DEMO-030,INR,329324.00

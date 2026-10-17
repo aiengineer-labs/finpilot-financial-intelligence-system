@@ -1,39 +1,29 @@
 "use client";
 
-import { useState } from "react";
-import type { Tenant, View } from "@/lib/types";
+import { humanize } from "@/lib/format";
+import type { Account, Tenant, View } from "@/lib/types";
 import { Icon } from "../ui/icons";
 import { Avatar, Pill, hueFor } from "../ui/primitives";
-import { Brand } from "./auth-screen";
+import { Brand } from "./brand";
 import { STAGES, type StageId, VIEWS } from "./shared";
 
 type Props = {
   tenant: Tenant;
-  view: View;
+  accounts: Account[];
+  activeAccountId: string | undefined;
+  busy: boolean;
+  onSwitchAccount: (accountId: string) => void;
+  view: View | null;
   open: boolean;
   badges: Partial<Record<View, number>>;
   completed: Set<StageId>;
-  demoIdentity: { email: string; password: string } | null;
   onNavigate: (view: View) => void;
   onClose: () => void;
-  onSignOut: () => void;
 };
 
-export function Sidebar({ tenant, view, open, badges, completed, demoIdentity, onNavigate, onClose, onSignOut }: Props) {
-  const [copied, setCopied] = useState(false);
+export function Sidebar({ tenant, accounts, activeAccountId, busy, onSwitchAccount, view, open, badges, completed, onNavigate, onClose }: Props) {
   const groups = ["Workspace", "Assurance", "Learn"] as const;
   const progress = Math.round((completed.size / STAGES.length) * 100);
-
-  async function copyPassword() {
-    if (!demoIdentity) return;
-    try {
-      await navigator.clipboard.writeText(demoIdentity.password);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setCopied(false);
-    }
-  }
 
   return (
     <aside className={`glass sidebar ${open ? "open" : ""}`} aria-label="Primary navigation">
@@ -44,8 +34,17 @@ export function Sidebar({ tenant, view, open, badges, completed, demoIdentity, o
 
       <div className="household">
         <Avatar label={tenant.name} hue={hueFor(tenant.name)} />
-        <div><b>{tenant.name}</b><small>{tenant.role} · private tenant</small></div>
+        <div><b>{tenant.name}</b><small>isolated passwordless workspace</small></div>
       </div>
+
+      {accounts.length > 1 && (
+        <label className="field account-field">
+          <span>Active account</span>
+          <select value={activeAccountId} disabled={busy} onChange={(event) => onSwitchAccount(event.target.value)}>
+            {accounts.map((account) => <option key={account.id} value={account.id}>{account.account_type === "unknown" ? account.name : `${account.name} · ${humanize(account.account_type)}`}</option>)}
+          </select>
+        </label>
+      )}
 
       <nav className="nav">
         {groups.map((group) => (
@@ -63,13 +62,10 @@ export function Sidebar({ tenant, view, open, badges, completed, demoIdentity, o
       </nav>
 
       <div className="sidebar-foot">
-        {demoIdentity && (
-          <div className="demo-card">
-            <Pill tone="info" icon="flask">Synthetic demo</Pill>
-            <small title={demoIdentity.email}>{demoIdentity.email}</small>
-            <button className="btn btn-glass btn-sm" onClick={copyPassword}><Icon name={copied ? "check" : "copy"} size={13} />{copied ? "Copied" : "Copy password"}</button>
-          </div>
-        )}
+        <div className="demo-card">
+          <Pill tone="info" icon="lock">Secure statement workspace</Pill>
+          <small>No login, password, or bank connection required.</small>
+        </div>
         <div className="pipeline-card">
           <div className="pipeline-head"><b>Pipeline</b><span>{completed.size}/{STAGES.length}</span></div>
           <div className="progress"><i style={{ width: `${progress}%` }} /></div>
@@ -77,7 +73,6 @@ export function Sidebar({ tenant, view, open, badges, completed, demoIdentity, o
             {STAGES.map(([id, label]) => <li key={id} className={completed.has(id) ? "done" : ""}><span>{completed.has(id) ? <Icon name="check" size={11} /> : null}</span>{label}</li>)}
           </ol>
         </div>
-        <button className="nav-signout" onClick={onSignOut}><Icon name="logout" size={16} />Sign out</button>
       </div>
     </aside>
   );

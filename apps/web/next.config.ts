@@ -3,6 +3,13 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  async rewrites() {
+    const api = process.env.API_INTERNAL_URL ?? "http://localhost:8000";
+    return [
+      { source: "/api/v1/:path*", destination: `${api}/api/v1/:path*` },
+      { source: "/api-health", destination: `${api}/health` }
+    ];
+  },
   async headers() {
     return [
       {

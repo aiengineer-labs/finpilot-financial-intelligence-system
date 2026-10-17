@@ -11,6 +11,7 @@ type Props = {
   insights: Insights;
   transactions: Transaction[];
   snapshot: Snapshot | null;
+  spendingOnly: boolean;
   hasAccount: boolean;
   busy: boolean;
   onNavigate: (view: View) => void;
@@ -18,7 +19,7 @@ type Props = {
   onRunAnalysis: () => void;
 };
 
-export function Overview({ insights, transactions, snapshot, hasAccount, busy, onNavigate, onLoadSample, onRunAnalysis }: Props) {
+export function Overview({ insights, transactions, snapshot, spendingOnly, hasAccount, busy, onNavigate, onLoadSample, onRunAnalysis }: Props) {
   if (!transactions.length) return <Onboarding hasAccount={hasAccount} busy={busy} onLoadSample={onLoadSample} onNavigate={onNavigate} />;
 
   const latest = insights.balances[insights.balances.length - 1];
@@ -31,7 +32,7 @@ export function Overview({ insights, transactions, snapshot, hasAccount, busy, o
   return (
     <div className="view-grid">
       <Panel className="span-8 hero-balance">
-        <PanelHeader eyebrow="LATEST KNOWN BALANCE" title={latest ? <span className="hero-figure">{money(latest.balance)}</span> : "No source balance"} subtitle={latest ? `Source-provided running balance on ${longDate(latest.day)}` : "This statement carries no balance column; FinPilot never infers one."} actions={first && latest && first.day !== latest.day ? <Pill tone={latest.balance >= first.balance ? "good" : "bad"} icon={latest.balance >= first.balance ? "arrowUpRight" : "arrowDownRight"}>{signedMoney(latest.balance - first.balance)} since {shortDate(first.day)}</Pill> : undefined} />
+        <PanelHeader eyebrow="LATEST KNOWN BALANCE" title={latest ? <span className="hero-figure">{money(latest.balance)}</span> : "No source balance"} subtitle={latest ? `Source-provided running balance on ${longDate(latest.day)}` : spendingOnly ? "Card or balance-free statement: spending, recurrence and anomalies are analysed; a balance is never inferred." : "This statement carries no balance column; FinPilot never infers one."} actions={first && latest && first.day !== latest.day ? <Pill tone={latest.balance >= first.balance ? "good" : "bad"} icon={latest.balance >= first.balance ? "arrowUpRight" : "arrowDownRight"}>{signedMoney(latest.balance - first.balance)} since {shortDate(first.day)}</Pill> : undefined} />
         {insights.balances.length > 1 && <LineChart height={210} ariaLabel="Daily closing balance from the imported statement" days={insights.balances.map((point) => point.day)} series={[{ id: "balance", label: "Closing balance", values: insights.balances.map((point) => point.balance), color: "var(--viz-1)", area: true }]} />}
       </Panel>
 
@@ -137,7 +138,7 @@ export function Overview({ insights, transactions, snapshot, hasAccount, busy, o
 function Onboarding({ hasAccount, busy, onLoadSample, onNavigate }: { hasAccount: boolean; busy: boolean; onLoadSample: () => void; onNavigate: (view: View) => void }) {
   const steps = [
     { title: "Create a private account", detail: "An empty INR ledger. No balance is invented.", done: hasAccount },
-    { title: "Import a statement", detail: "UTF-8 CSV with an explicit column mapping.", done: false },
+    { title: "Import a statement", detail: "Content-validated CSV or supported text PDF with traceable parsing.", done: false },
     { title: "Run deterministic analysis", detail: "Snapshot, recurrence, anomalies and a 30/60/90-day forecast.", done: false },
     { title: "Ask the verified advisor", detail: "Mesh-powered specialists, checked by plain-code verification.", done: false }
   ];
@@ -146,12 +147,12 @@ function Onboarding({ hasAccount, busy, onLoadSample, onNavigate }: { hasAccount
       <Panel className="span-7 onboarding">
         <p className="eyebrow">GET STARTED</p>
         <h2 className="display">Bring a statement.<br />FinPilot shows its work.</h2>
-        <p className="lede">Every number on the next screen comes from rows you import. Use the bundled synthetic household to explore the full flow in seconds.</p>
+        <p className="lede">Every number on the next screen comes from rows you import. The workspace starts empty; use your CSV or supported PDF, or explicitly select the fictional demo file.</p>
         <div className="button-row">
-          <button className="btn btn-primary btn-lg" onClick={onLoadSample} disabled={busy}><Icon name="bolt" size={16} />{busy ? "Importing…" : "Load synthetic sample"}</button>
-          <button className="btn btn-glass btn-lg" onClick={() => onNavigate("ledger")}><Icon name="upload" size={16} />Upload my CSV</button>
+          <button className="btn btn-primary btn-lg" onClick={onLoadSample} disabled={busy}><Icon name="flask" size={16} />{busy ? "Importing…" : "Use fictional demo CSV"}</button>
+          <button className="btn btn-glass btn-lg" onClick={() => onNavigate("ledger")}><Icon name="upload" size={16} />Upload my statement</button>
         </div>
-        <a className="text-link" href={SAMPLE_STATEMENT.path} download><Icon name="download" size={14} />Download the sample CSV (141 fictional rows)</a>
+        <a className="text-link" href={SAMPLE_STATEMENT.path} download><Icon name="download" size={14} />Download the upload-ready CSV (30 fictional rows)</a>
       </Panel>
       <Panel className="span-5">
         <PanelHeader eyebrow="CHECKLIST" title="Four steps to a verified answer" />
@@ -165,7 +166,7 @@ function Onboarding({ hasAccount, busy, onLoadSample, onNavigate }: { hasAccount
         </ol>
         <div className="sample-facts">
           <Pill tone="info" icon="flask">Synthetic</Pill>
-          <span>Jul–Oct 2026 · salary, rent, subscriptions, transfers, a refund, three outliers, one duplicate and one invalid row.</span>
+          <span>Jul–Oct 2026 · 30 clean rows with salary, rent, subscriptions, transfers, a refund and an unusual medical expense.</span>
         </div>
       </Panel>
     </div>

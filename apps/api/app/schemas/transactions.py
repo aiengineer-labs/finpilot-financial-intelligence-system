@@ -15,6 +15,15 @@ class UploadResponse(BaseModel):
     rejected_rows: int
     duplicate_rows: int
     row_errors: list[dict[str, str | int]]
+    source_format: str
+    detected_content_type: str
+    parser_name: str
+    parser_version: str
+    extraction_method: str
+    page_count: int | None
+    warnings: list[str]
+    processing_duration_ms: int
+    statement_kind: str
     replayed: bool = False
 
 
@@ -22,6 +31,7 @@ class TransactionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    account_id: UUID
     upload_id: UUID
     transaction_date: date
     amount_minor: int
@@ -36,6 +46,7 @@ class TransactionResponse(BaseModel):
     classification_method: ClassificationMethod
     classification_confidence_bps: int
     is_excluded_from_cashflow: bool
+    source_evidence: dict[str, int | str]
     created_at: datetime
 
 

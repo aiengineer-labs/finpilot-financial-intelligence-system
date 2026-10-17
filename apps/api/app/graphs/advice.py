@@ -13,11 +13,8 @@ from app.agents.specialists import (
     FinancialAdvisorAgent,
 )
 from app.database.models import VerificationStatus
+from app.graphs.manifest import ADVICE_NODE_IDS
 from app.integrations.mesh import MeshClient, MeshResult
-
-GRAPH_VERSION = "advice-graph-v1"
-PROMPT_VERSION = "advice-prompts-v1"
-VERIFIER_VERSION = "financial-verifier-v1"
 
 
 class AdviceState(TypedDict):
@@ -105,12 +102,16 @@ class AdviceWorkflow:
         self._advisor = FinancialAdvisorAgent(mesh)
         self._critic = CriticAgent(mesh)
         builder = StateGraph(AdviceState)
-        builder.add_node("supervisor", self._supervisor)
-        builder.add_node("behavior_analyst", self._behavior_analyst)
-        builder.add_node("financial_advisor", self._financial_advisor)
-        builder.add_node("verification", self._verification)
-        builder.add_node("critic", self._critic_node)
-        builder.add_node("revision", self._revision)
+        handlers = {
+            "supervisor": self._supervisor,
+            "behavior_analyst": self._behavior_analyst,
+            "financial_advisor": self._financial_advisor,
+            "verification": self._verification,
+            "critic": self._critic_node,
+            "revision": self._revision,
+        }
+        for node_id in ADVICE_NODE_IDS:
+            builder.add_node(node_id, handlers[node_id])
         builder.add_edge(START, "supervisor")
         builder.add_edge("supervisor", "behavior_analyst")
         builder.add_edge("behavior_analyst", "financial_advisor")
@@ -147,7 +148,14 @@ class AdviceWorkflow:
         return cast(AdviceState, await self.graph.ainvoke(initial))
 
     async def _supervisor(self, state: AdviceState) -> dict[str, Any]:
-        intent = "scenario_advice" if state["context"].get("scenario_id") else "forecast_advice"
+        context = state["context"]
+        if context.get("scenario_id"):
+            intent = "scenario_advice"
+        elif context.get("forecast"):
+            intent = "forecast_advice"
+        else:
+            # Card and balance-free statements: advice on reducing spending.
+            intent = "spending_advice"
         event = {
             "node": "supervisor",
             "event_type": "route",

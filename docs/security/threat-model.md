@@ -14,7 +14,8 @@ The browser and every submitted value are untrusted. Authentication establishes 
 - **Model-provider bypass (critical):** all application inference is centralized in `MeshClient`; its configurable URL is constrained to HTTPS `api.meshapi.ai`. A key/model is required, with no provider fallback.
 - **Financial hallucination or arithmetic error (critical):** no recommendation endpoint exists until deterministic engines and the independent verification gate are integrated. Model output will never be authoritative arithmetic.
 - **SQL injection (high):** SQLAlchemy parameterized statements; arbitrary SQL is absent from agent tools.
-- **CSV formula injection (medium):** original ledger text remains data; exports neutralize formula-leading cells. Full CSV ingestion limits and content validation are Phase 2.
+- **Malicious statement upload (high):** filenames and client MIME values are never sufficient. The API caps reads at 5 MiB, detects CSV/PDF bytes, requires extension and MIME consistency, parses PDFs strictly, rejects encryption and active-content markers, and bounds pages, objects, and extracted text. Parsers still process hostile bytes, so process-level sandboxing, malware scanning/CDR, and OCR isolation remain deployment follow-ups.
+- **CSV formula injection (medium):** original ledger text remains inert data; any future export must neutralize formula-leading cells.
 - **XSS/clickjacking/content sniffing (high):** React escaping plus API and web security headers. Rich model Markdown/HTML rendering is not allowed until sanitization is implemented.
 - **CSRF (medium):** current APIs use explicit bearer headers and no credentialed CORS. A future cookie session design must add SameSite and CSRF controls.
 - **SSRF/tool abuse (critical):** agents receive no generic network, filesystem, shell, SQL, transfer, trade, or purchase tool. Mesh is the sole model network destination.

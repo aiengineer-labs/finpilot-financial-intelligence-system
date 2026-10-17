@@ -24,6 +24,49 @@ class RecurringPatternResponse(BaseModel):
     explanation: str
 
 
+class SpendingCategoryResponse(BaseModel):
+    category: str
+    spend_minor: int
+    transaction_count: int
+    share_bps: int
+    monthly_spend_minor: int
+    monthly_saving_minor: int
+
+
+class SpendingMerchantResponse(BaseModel):
+    merchant: str
+    spend_minor: int
+    transaction_count: int
+    monthly_spend_minor: int
+
+
+class RecurringChargeResponse(BaseModel):
+    pattern_id: str
+    merchant: str
+    cadence: str
+    amount_minor: int
+    monthly_equivalent_minor: int
+
+
+class SpendingSummaryResponse(BaseModel):
+    account_type: str
+    period_start: date
+    period_end: date
+    period_days: int
+    total_spend_minor: int
+    inflow_minor: int
+    refunds_minor: int
+    net_flow_minor: int
+    savings_rate_bps: int | None
+    average_daily_spend_minor: int
+    projected_30_day_spend_minor: int
+    reduction_percent: int
+    combined_monthly_saving_minor: int
+    categories: list[SpendingCategoryResponse]
+    merchants: list[SpendingMerchantResponse]
+    recurring_charges: list[RecurringChargeResponse]
+
+
 class SnapshotResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -31,12 +74,14 @@ class SnapshotResponse(BaseModel):
     account_id: UUID
     as_of: date
     currency: str
-    opening_balance_minor: int
+    opening_balance_minor: int | None
+    analysis_mode: Literal["cashflow", "spending"]
     source_transaction_count: int
     source_transaction_ids: list[str]
     input_sha256: str
     engine_version: str
     anomaly_results: list[dict[str, str | int]]
+    spending: SpendingSummaryResponse | None
     recurring_patterns: list[RecurringPatternResponse]
     created_at: datetime
 

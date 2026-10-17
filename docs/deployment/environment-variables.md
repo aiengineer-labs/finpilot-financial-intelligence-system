@@ -16,7 +16,8 @@
 
 ## Web
 
-- `NEXT_PUBLIC_API_BASE_URL`: public API origin. This value is embedded in the browser bundle and must never contain credentials.
+- `NEXT_PUBLIC_API_BASE_URL`: optional public API origin. Leave blank for the same-origin Next.js gateway; if set, it is embedded in the browser bundle and must never contain credentials.
+- `API_INTERNAL_URL`: server-side FastAPI origin used by the Next.js gateway (`http://api:8000` in Docker Compose).
 
 `.env.example` contains placeholders. The ignored local `.env` is not a deployment source of truth and must never be committed.
 
