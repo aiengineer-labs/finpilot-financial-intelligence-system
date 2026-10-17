@@ -106,6 +106,9 @@ class _PositionedText:
     y: float
     font_size: float
     text: str
+    # False when the page's transformation matrix flips the y axis, so a larger text-matrix
+    # y is lower on the page (common in HTML-to-PDF output).
+    y_up: bool = True
 
 
 def _normalized_content_type(content_type: str | None) -> str:
@@ -248,26 +251,12 @@ _YEAR_PATTERN = re.compile(
 def _reads_downward(fragments: list[_PositionedText]) -> bool:
     """Return True when a larger text-matrix y is higher on the page (the PDF default).
 
-    Some generators (for example HTML-to-PDF renderers) flip the coordinate system with a
-    transformation matrix, so the text matrix can run either way. A table header always
-    precedes its rows, which fixes the reading direction for the page.
+    The transformation matrix is authoritative and present on every page, including
+    continuation pages that do not repeat the table header.
     """
 
-    headers = [
-        fragment.y
-        for fragment in fragments
-        if fragment.text.casefold() == "date" or fragment.text.casefold().endswith(" date")
-    ]
-    amounts = [
-        fragment.y
-        for fragment in fragments
-        if _AMOUNT_PATTERN.fullmatch(fragment.text.replace(" ", ""))
-    ]
-    if not headers or not amounts:
-        return True
-    header_y = sum(headers) / len(headers)
-    below = sum(1 for y in amounts if y < header_y)
-    return below * 2 >= len(amounts)
+    flipped = sum(1 for fragment in fragments if not fragment.y_up)
+    return flipped * 2 < len(fragments) or not fragments
 
 
 def _normalized_fragment(text: str) -> str:
@@ -298,7 +287,7 @@ def _extract_positioned_text(
 
     def visitor(
         text: str,
-        _current_matrix: list[float],
+        current_matrix: list[float],
         text_matrix: list[float],
         _font: object,
         font_size: float,
@@ -317,6 +306,7 @@ def _extract_positioned_text(
                     y=float(text_matrix[5]),
                     font_size=max(float(font_size), 1.0),
                     text=normalized,
+                    y_up=float(current_matrix[3]) >= 0,
                 )
             )
 

@@ -69,13 +69,18 @@ def statement_pdf(*lines: str, encrypt: bool = False, active: bool = False) -> b
 
 
 def positioned_statement_pdf(*items: tuple[float, float, str], flipped: bool = False) -> bytes:
+    return positioned_pages_pdf([list(items)], flipped=flipped)
+
+
+def positioned_pages_pdf(
+    pages: list[list[tuple[float, float, str]]], flipped: bool = False
+) -> bytes:
     """Place text at page coordinates; ``flipped`` mimics HTML-to-PDF renderers.
 
     Those renderers flip the y axis with ``cm`` and counter-flip each text matrix, so the
     page looks identical while text-matrix y grows downward.
     """
     writer = PdfWriter()
-    page = writer.add_blank_page(width=700, height=792)
     font = DictionaryObject(
         {
             NameObject("/Type"): NameObject("/Font"),
@@ -84,19 +89,21 @@ def positioned_statement_pdf(*items: tuple[float, float, str], flipped: bool = F
         }
     )
     font_reference = writer._add_object(font)
-    page[NameObject("/Resources")] = DictionaryObject(
-        {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_reference})}
-    )
-    operations = ["q", "1 0 0 -1 0 792 cm"] if flipped else []
-    for x, y, text in items:
-        escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-        matrix = f"1 0 0 -1 {x} {792 - y}" if flipped else f"1 0 0 1 {x} {y}"
-        operations.extend(("BT", "/F1 8 Tf", f"{matrix} Tm", f"({escaped}) Tj", "ET"))
-    if flipped:
-        operations.append("Q")
-    stream = DecodedStreamObject()
-    stream.set_data("\n".join(operations).encode())
-    page[NameObject("/Contents")] = writer._add_object(stream)
+    for items in pages:
+        page = writer.add_blank_page(width=700, height=792)
+        page[NameObject("/Resources")] = DictionaryObject(
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_reference})}
+        )
+        operations = ["q", "1 0 0 -1 0 792 cm"] if flipped else []
+        for x, y, text in items:
+            escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+            matrix = f"1 0 0 -1 {x} {792 - y}" if flipped else f"1 0 0 1 {x} {y}"
+            operations.extend(("BT", "/F1 8 Tf", f"{matrix} Tm", f"({escaped}) Tj", "ET"))
+        if flipped:
+            operations.append("Q")
+        stream = DecodedStreamObject()
+        stream.set_data("\n".join(operations).encode())
+        page[NameObject("/Contents")] = writer._add_object(stream)
     output = BytesIO()
     writer.write(output)
     return output.getvalue()
@@ -221,6 +228,49 @@ def test_split_dates_and_wrapped_details_follow_reading_order(flipped: bool) -> 
     ]
     assert [row.amount_minor for row in rows] == [18_600, -34_100]
     assert rows[0].description == "UPI PAYMENT RECEIVED/refund-0001"
+
+
+@pytest.mark.parametrize("flipped", [False, True])
+def test_continuation_page_without_header_keeps_dates_and_distinct_rows(flipped: bool) -> None:
+    def row(y: float, day: str, details: str, amount: str, direction: str) -> list:
+        return [
+            (40, y + 12, day),
+            (40, y, "May"),
+            (40, y - 12, "'25"),
+            (90, y, details),
+            (470, y, amount),
+            (530, y, direction),
+        ]
+
+    first_page = [
+        (40, 750, "Date"),
+        (90, 750, "Transaction Details"),
+        (470, 750, "Amount"),
+        (530, 750, "Debit/Credit"),
+        *row(700, "19", "SwiggyInstamart", "13.00", "Credit"),
+    ]
+    second_page = [
+        *row(740, "19", "SwiggyInstamart", "495.00", "Debit"),
+        *row(690, "13", "UPI/Wellness Store", "759.05", "Debit"),
+        *row(640, "08", "SwiggyInstamart", "495.00", "Debit"),
+        *row(590, "05", "Joining Fee", "500.00", "Debit"),
+    ]
+    result = parse_statement(
+        positioned_pages_pdf([first_page, second_page], flipped=flipped),
+        filename="card.pdf",
+        claimed_content_type="application/pdf",
+        mapping=_mapping(),
+    )
+
+    rows = result.transactions.rows
+    assert result.transactions.duplicate_rows == 0
+    assert [(row.transaction_date.date().isoformat(), row.amount_minor) for row in rows] == [
+        ("2025-05-19", 1_300),
+        ("2025-05-19", -49_500),
+        ("2025-05-13", -75_905),
+        ("2025-05-08", -49_500),
+        ("2025-05-05", -50_000),
+    ]
 
 
 def test_card_statement_markers_classify_the_statement_kind() -> None:
