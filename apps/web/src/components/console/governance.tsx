@@ -14,11 +14,29 @@ function levelTone(level: string): Tone {
 function statusTone(status: string): Tone {
   if (["approved", "passed", "pass", "accepted", "resolved", "delivered"].includes(status)) return "good";
   if (["failed", "fail", "rejected", "blocked"].includes(status)) return "bad";
-  if (["pending", "proposed", "draft", "incomplete"].includes(status)) return "warn";
+  if (["pending", "proposed", "draft", "incomplete", "not_run"].includes(status)) return "warn";
   return "neutral";
 }
 
+function blockerLabel(blocker: string) {
+  if (blocker === "evaluation:mesh-model-redteam:not_run") return "Model security check has not run";
+  if (blocker.startsWith("evaluation:")) return `${humanize(blocker.split(":")[1] ?? "evaluation")} needs attention`;
+  if (blocker.startsWith("risk:")) return `${blocker.split(":")[1] ?? "Risk"} requires review`;
+  return humanize(blocker.replaceAll(":", " "));
+}
+
+function evaluationFailure(failure: string) {
+  return failure === "External Mesh egress approval pending"
+    ? "Run the model security suite to complete this check."
+    : failure;
+}
+
 type GovernanceProps = { data: GovernanceData | null; busy: boolean; createDemo: () => void; rejectReview: (id: string) => void };
+
+function artifactConfiguration(configuration: Record<string, string | number | boolean | string[]>) {
+  const preferred = ["model_id", "reasoning_effort", "response_format", "template_version", "policy_version"];
+  return preferred.flatMap((key) => key in configuration ? [[key, configuration[key]] as const] : []).slice(0, 3);
+}
 
 export function GovernanceView({ data, busy, createDemo, rejectReview }: GovernanceProps) {
   if (!data) return <div className="view-grid"><Panel className="span-12"><EmptyState icon="governance" title="Loading governance evidence">Resolving approved assets, risk controls and review lineage.</EmptyState></Panel></div>;
@@ -35,18 +53,23 @@ export function GovernanceView({ data, busy, createDemo, rejectReview }: Governa
 
       {data.summary.release_blockers.length > 0 && (
         <Panel className="span-12 callout-panel">
-          <div className="callout bad"><Icon name="lock" size={16} /><div><b>Release blocked by {data.summary.release_blockers.length} control{data.summary.release_blockers.length === 1 ? "" : "s"}</b><ul>{data.summary.release_blockers.map((item) => <li key={item}>{item}</li>)}</ul></div></div>
+          <div className="callout info"><Icon name="lock" size={16} /><div><b>{data.summary.release_blockers.length} AI readiness check{data.summary.release_blockers.length === 1 ? "" : "s"} remaining</b><ul>{data.summary.release_blockers.map((item) => <li key={item}>{blockerLabel(item)}</li>)}</ul></div></div>
         </Panel>
       )}
 
       <Panel className="span-7">
-        <PanelHeader eyebrow="LIVE EVALUATION GATES" title="Promotion evidence" subtitle="Model, prompt and policy changes cannot ship past a failing gate" />
+        <PanelHeader eyebrow="AI READINESS" title="Quality checks" subtitle="Independent checks required before a model or prompt change is released" />
         {data.evaluations.length ? (
           <ul className="gate-list">
             {data.evaluations.map((item) => (
               <li key={item.id}>
-                <Pill tone={statusTone(item.status)} withIcon>{humanize(item.status)}</Pill>
-                <div><b>{item.dataset_id}</b><small>{item.dataset_version} · code {item.code_version} · {item.duration_ms} ms{item.model_id ? ` · ${item.model_id}` : ""}</small>{item.failures.map((failure) => <em key={failure}>{failure}</em>)}</div>
+                <span className={`gate-status ${item.status}`}><Icon name={item.status === "pass" ? "check" : item.status === "not_run" ? "clock" : "alert"} size={16} /></span>
+                <div>
+                  <header><b>{item.dataset_id === "mesh-model-redteam" ? "Model security test" : "Prompt-injection test"}</b><Pill tone={statusTone(item.status)}>{item.status === "not_run" ? "Action needed" : humanize(item.status)}</Pill></header>
+                  <p>{item.dataset_id === "mesh-model-redteam" ? "Challenges the live AI model with adversarial financial prompts." : "Checks that statement text cannot override FinPilot's safety rules."}</p>
+                  <div className="gate-meta"><span>{item.duration_ms ? `${item.duration_ms} ms` : "Not run yet"}</span>{item.model_id && <span>{item.model_id}</span>}<span>Code {item.code_version}</span></div>
+                  {item.failures.map((failure) => <em key={failure}>{evaluationFailure(failure)}</em>)}
+                </div>
               </li>
             ))}
           </ul>
@@ -82,6 +105,9 @@ export function GovernanceView({ data, busy, createDemo, rejectReview }: Governa
               <header><span className="muted">{humanize(item.artifact_type)}</span><Pill tone={statusTone(item.status)}>{humanize(item.status)}</Pill></header>
               <b>{item.name}</b>
               <small>{item.version}</small>
+              {artifactConfiguration(item.configuration).length > 0 && <dl className="artifact-config">
+                {artifactConfiguration(item.configuration).map(([key, value]) => <div key={key}><dt>{humanize(key)}</dt><dd>{Array.isArray(value) ? value.join(", ") : String(value)}</dd></div>)}
+              </dl>}
               <code title={item.content_sha256}>{item.content_sha256.slice(0, 16)}…</code>
               <small className="muted">{humanize(item.approval_source)}</small>
             </article>

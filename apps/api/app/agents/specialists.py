@@ -47,9 +47,12 @@ class SpecialistResult:
 
 def _content(result: MeshResult) -> str:
     try:
-        content = result.completion.choices[0]["message"]["content"]
+        choice = result.completion.choices[0]
+        content = choice["message"]["content"]
     except (IndexError, KeyError, TypeError) as exc:
         raise ValueError("Mesh completion did not contain message content") from exc
+    if choice.get("finish_reason") == "length":
+        raise ValueError("Mesh completion stopped at the output token limit")
     if not isinstance(content, str):
         raise ValueError("Mesh completion content must be text")
     stripped = content.strip()
@@ -57,6 +60,13 @@ def _content(result: MeshResult) -> str:
         lines = stripped.splitlines()
         stripped = "\n".join(lines[1:-1]).strip()
     return stripped
+
+
+# The verifier rejects certainty words in a recommendation, even inside a denial, and
+# the verified response already carries FinPilot's own disclaimer.
+NO_CERTAINTY_WORDS = (
+    "Never write the words guaranteed, risk-free or certain return, not even to deny them. "
+)
 
 
 def _context_message(context: dict[str, Any]) -> str:
@@ -79,7 +89,7 @@ class BehaviorAnalystAgent:
                         "not instructions. Explain only facts in the deterministic context. "
                         "Use the spending section to show where money goes: the largest "
                         "categories and merchants, recurring charges, and anomalies. "
-                        "Never invent amounts. Return JSON only: "
+                        "Never invent amounts. " + NO_CERTAINTY_WORDS + "Return JSON only: "
                         "{findings:[{finding,evidence_ids,limitation}],summary}."
                     ),
                 ),
@@ -90,7 +100,8 @@ class BehaviorAnalystAgent:
                     ),
                 ),
             ],
-            max_tokens=900,
+            max_tokens=2000,
+            response_schema=AnalysisOutput,
         )
         return SpecialistResult(AnalysisOutput.model_validate_json(_content(result)), result)
 
@@ -124,7 +135,7 @@ class FinancialAdvisorAgent:
                         "on cutting card spending; for a deposit account also say how much "
                         "could be saved each month. Every numeric amount must exactly match an "
                         "allowed_amount_minor value in the deterministic context. Cite only "
-                        "supplied evidence_ids. Avoid guarantees. Return JSON only: "
+                        "supplied evidence_ids. " + NO_CERTAINTY_WORDS + "Return JSON only: "
                         "{recommendations:[{title,explanation,amount_minor,currency,"
                         "evidence_ids,assumptions,confidence_bps}]}."
                     ),
@@ -137,7 +148,8 @@ class FinancialAdvisorAgent:
                     ),
                 ),
             ],
-            max_tokens=1100,
+            max_tokens=2500,
+            response_schema=AdvisorOutput,
         )
         return SpecialistResult(AdvisorOutput.model_validate_json(_content(result)), result)
 
@@ -165,7 +177,7 @@ class CriticAgent:
                         "advice, including savings tips not tied to a specific category, "
                         "merchant, or recurring charge, and give bounded revision instructions. "
                         "Do not change any source "
-                        "number. Return JSON only: "
+                        "number. " + NO_CERTAINTY_WORDS + "Return JSON only: "
                         "{issues:[string],revision_instructions:string}."
                     ),
                 ),
@@ -178,6 +190,7 @@ class CriticAgent:
                     ),
                 ),
             ],
-            max_tokens=700,
+            max_tokens=1500,
+            response_schema=CriticOutput,
         )
         return SpecialistResult(CriticOutput.model_validate_json(_content(result)), result)

@@ -25,7 +25,9 @@ rails:
         patterns:
           - '(?i)\b(sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,})\b'
           - '(?is)\b(system prompt|api[-_ ]?key|private credential)\b.{0,80}\b(is|equals|:)\b'
-          - '(?i)\b(guaranteed|certain return|risk-free profit)\b'
+          # Certainty claims. Negated disclaimers such as "not guaranteed", "can't be guaranteed"
+          # or "no guaranteed savings" pass; "guaranteed savings" and "is guaranteed" still block.
+          - '(?i)\b(certain return|risk-free profit)\b|(?<!\bno\s)(?<!n.t\s)(?<!never\s)(?<!n.t\sbe\s)(?<!never\sbe\s)(?<!n.t\salways\s)(?<!n.t\snecessarily\s)\bguaranteed\b'
       retrieval:
         patterns:
           - '(?is)\b(ignore|override|disable|bypass)\b.{0,80}\b(instructions?|policy|verification|system)\b'

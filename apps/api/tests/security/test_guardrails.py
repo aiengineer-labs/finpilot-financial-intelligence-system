@@ -66,8 +66,51 @@ async def test_nemo_output_rail_blocks_prohibited_certainty() -> None:
         OutputTransport(json.dumps({"answer": "This is a guaranteed risk-free profit"})),
         output_guard=ModelGuardrails(),
     )
-    with pytest.raises(GuardrailViolation, match="output blocked"):
+    with pytest.raises(GuardrailViolation, match="output blocked") as blocked:
         await client.complete([MeshMessage(role="user", content="question")])
+    assert blocked.value.rule == "certainty_language"
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Savings are guaranteed",
+        "You get guaranteed savings",
+        "This is guaranteed to cut your bill",
+        "It's not a lie: savings are guaranteed",
+        "A certain return of 8%",
+    ],
+)
+async def test_nemo_output_rail_names_the_rule_for_certainty_claims(claim: str) -> None:
+    client = MeshClient(
+        _settings(),
+        OutputTransport(json.dumps({"answer": claim})),
+        output_guard=ModelGuardrails(),
+    )
+    with pytest.raises(GuardrailViolation, match="certainty_language") as blocked:
+        await client.complete([MeshMessage(role="user", content="question")])
+    assert blocked.value.rule == "certainty_language"
+    assert claim not in str(blocked.value)
+
+
+@pytest.mark.parametrize(
+    "disclaimer",
+    [
+        "These savings are not guaranteed",
+        "Savings aren't guaranteed",
+        "Returns cannot be guaranteed",
+        "There are no guaranteed savings",
+        "Estimates, not necessarily guaranteed",
+    ],
+)
+async def test_nemo_output_rail_allows_negated_disclaimers(disclaimer: str) -> None:
+    client = MeshClient(
+        _settings(),
+        OutputTransport(json.dumps({"answer": disclaimer})),
+        output_guard=ModelGuardrails(),
+    )
+    result = await client.complete([MeshMessage(role="user", content="question")])
+    assert disclaimer in result.completion.choices[0]["message"]["content"]
 
 
 async def test_mesh_output_is_redacted_before_agent_parsing() -> None:

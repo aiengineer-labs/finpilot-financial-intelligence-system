@@ -31,14 +31,40 @@ class AdviceState(TypedDict):
     final_response: str
 
 
+def _count(values: Any, key: str) -> int | None:
+    value = values.get(key) if isinstance(values, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def _usage(result: MeshResult) -> tuple[int, int]:
     usage = result.completion.usage or {}
-    return usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+    return _count(usage, "prompt_tokens") or 0, _count(usage, "completion_tokens") or 0
+
+
+def _billing(result: MeshResult) -> dict[str, Any]:
+    """Cost facts exactly as Mesh reports them; absent fields are omitted, never estimated."""
+
+    usage = result.completion.usage or {}
+    billing: dict[str, Any] = {}
+    cost = usage.get("cost_usd")
+    if isinstance(cost, int | float | str) and not isinstance(cost, bool):
+        billing["cost_usd"] = str(cost)
+    cached = _count(usage.get("prompt_tokens_details"), "cached_tokens")
+    if cached is not None:
+        billing["cached_input_tokens"] = cached
+    reasoning = _count(usage.get("completion_tokens_details"), "reasoning_tokens")
+    if reasoning is not None:
+        billing["reasoning_tokens"] = reasoning
+    return billing
 
 
 def _mesh_event(node: str, summary: str, result: MeshResult) -> dict[str, Any]:
     input_tokens, output_tokens = _usage(result)
-    details: dict[str, Any] = {"gateway": "Mesh API", "model": result.completion.model}
+    details: dict[str, Any] = {
+        "gateway": "Mesh API",
+        "model": result.completion.model,
+        **_billing(result),
+    }
     if result.guardrails is not None:
         details["guardrails"] = result.guardrails
     return {

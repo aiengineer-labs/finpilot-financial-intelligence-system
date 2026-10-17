@@ -2,12 +2,16 @@ import json
 from typing import Any
 from uuid import UUID
 
+import pytest
 from httpx import AsyncClient
 from pydantic import SecretStr
+from sqlalchemy import select
 
 from app.core.settings import Settings
+from app.database.models import AgentEvent
 from app.database.session import SessionFactory
-from app.integrations.mesh import MeshClient
+from app.guardrails.service import get_model_guardrails
+from app.integrations.mesh import MeshClient, MeshProviderError
 from app.services.agent_runs import execute_advice
 
 
@@ -570,3 +574,118 @@ async def test_bank_forecast_advice_also_receives_spending_evidence(client: Asyn
     assert run["intent"] == "forecast_advice"
     assert run["verification_status"] == "accept"
     assert run["recommendations"][0]["amount_minor"] == saving
+
+
+class CertaintyTransport:
+    async def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": "certainty",
+            "model": "mesh-test-model",
+            "choices": [{"message": {"content": '{"summary": "Savings are guaranteed"}'}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
+
+
+class InsufficientBalanceTransport:
+    async def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        raise MeshProviderError("the Mesh account has insufficient balance for this model", 402)
+
+
+async def test_provider_failure_reason_is_persisted_and_reported(client: AsyncClient) -> None:
+    token, tenant, user = await _identity(client, "mesh-balance@example.com", "Mesh Balance")
+    headers = {"Authorization": f"Bearer {token}", "X-Tenant-ID": tenant}
+    account = await client.post(
+        "/api/v1/accounts",
+        headers=headers,
+        json={"name": "Bank", "currency": "INR", "external_reference": "mesh-balance"},
+    )
+    account_id = account.json()["id"]
+    bank_csv = b"""Date,Narration,Withdrawal Amt.,Deposit Amt.,Closing Balance
+01/09/2026,SALARY ACME,,"50,000.00","60,000.00"
+05/09/2026,GREEN HOMES RENT,"20,000.00",,"40,000.00"
+"""
+    await client.post(
+        f"/api/v1/accounts/{account_id}/transaction-uploads",
+        headers=headers,
+        data={"mapping": json.dumps(UI_MAPPING)},
+        files={"file": ("bank.csv", bank_csv, "text/csv")},
+    )
+    snapshot = (
+        await client.post(
+            "/api/v1/analytics/snapshots",
+            headers=headers,
+            json={"account_id": account_id, "as_of": "2026-09-05"},
+        )
+    ).json()
+    async with SessionFactory() as session:
+        with pytest.raises(RuntimeError, match="insufficient balance"):
+            await execute_advice(
+                session,
+                tenant_id=UUID(tenant),
+                user_id=UUID(user),
+                forecast_id=None,
+                snapshot_id=UUID(snapshot["id"]),
+                scenario_id=None,
+                question="Where can I cut spending?",
+                mesh=MeshClient(TEST_SETTINGS, InsufficientBalanceTransport()),
+            )
+        failure = await session.scalar(
+            select(AgentEvent).where(
+                AgentEvent.tenant_id == UUID(tenant), AgentEvent.event_type == "failure"
+            )
+        )
+    assert failure is not None
+    assert failure.details == {"error_type": "MeshProviderError", "provider_status": 402}
+
+
+async def test_guardrail_block_names_the_rule_without_model_text(client: AsyncClient) -> None:
+    token, tenant, user = await _identity(client, "mesh-guard@example.com", "Mesh Guard")
+    headers = {"Authorization": f"Bearer {token}", "X-Tenant-ID": tenant}
+    account = await client.post(
+        "/api/v1/accounts",
+        headers=headers,
+        json={"name": "Bank", "currency": "INR", "external_reference": "mesh-guard"},
+    )
+    account_id = account.json()["id"]
+    bank_csv = b"""Date,Narration,Withdrawal Amt.,Deposit Amt.,Closing Balance
+01/09/2026,SALARY ACME,,"50,000.00","60,000.00"
+05/09/2026,GREEN HOMES RENT,"20,000.00",,"40,000.00"
+"""
+    await client.post(
+        f"/api/v1/accounts/{account_id}/transaction-uploads",
+        headers=headers,
+        data={"mapping": json.dumps(UI_MAPPING)},
+        files={"file": ("bank.csv", bank_csv, "text/csv")},
+    )
+    snapshot = (
+        await client.post(
+            "/api/v1/analytics/snapshots",
+            headers=headers,
+            json={"account_id": account_id, "as_of": "2026-09-05"},
+        )
+    ).json()
+    async with SessionFactory() as session:
+        with pytest.raises(RuntimeError, match="output guardrail blocked") as failed:
+            await execute_advice(
+                session,
+                tenant_id=UUID(tenant),
+                user_id=UUID(user),
+                forecast_id=None,
+                snapshot_id=UUID(snapshot["id"]),
+                scenario_id=None,
+                question="Where can I cut spending?",
+                mesh=MeshClient(
+                    TEST_SETTINGS, CertaintyTransport(), output_guard=get_model_guardrails()
+                ),
+            )
+        failure = await session.scalar(
+            select(AgentEvent).where(
+                AgentEvent.tenant_id == UUID(tenant), AgentEvent.event_type == "failure"
+            )
+        )
+    assert "Savings are guaranteed" not in str(failed.value)
+    assert failure is not None
+    assert failure.details == {
+        "error_type": "GuardrailViolation",
+        "guardrail_rule": "certainty_language",
+    }

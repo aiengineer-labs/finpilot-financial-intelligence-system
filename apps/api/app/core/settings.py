@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     mesh_base_url: AnyHttpUrl = AnyHttpUrl("https://api.meshapi.ai/v1")
     mesh_model: str = ""
     mesh_timeout_seconds: float = Field(default=20, gt=0, le=60)
+    mesh_reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] | None = "low"
     cron_secret: SecretStr | None = None
     digest_dispatch_limit: int = Field(default=25, ge=1, le=100)
 
@@ -28,6 +29,11 @@ class Settings(BaseSettings):
         if value.host != "api.meshapi.ai" or value.scheme != "https":
             raise ValueError("all model inference must use https://api.meshapi.ai")
         return value
+
+    @field_validator("mesh_reasoning_effort", mode="before")
+    @classmethod
+    def blank_reasoning_effort_disables_reasoning(cls, value: object) -> object:
+        return None if value == "" else value
 
     @field_validator("session_secret")
     @classmethod

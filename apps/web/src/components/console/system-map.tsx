@@ -123,7 +123,7 @@ export function SystemMap({ architecture, agentRun, visibleEvents, setVisibleEve
       ) : (
         <Panel className="timeline-panel">
           <PanelHeader eyebrow="PERSISTED RUN" title={agentRun ? `${agentRun.events.length} recorded transitions` : "No timeline yet"} subtitle={agentRun ? `${agentRun.total_input_tokens + agentRun.total_output_tokens} tokens · ${agentRun.total_latency_ms} ms · ${agentRun.revision_attempts} revisions` : "The timeline appears only after a real uploaded statement is processed."} />
-          {agentRun ? <ol className="system-timeline">{agentRun.events.map((event, index) => <li key={event.id} className={index < visibleEvents ? "visible" : ""}><span>{event.sequence}</span><div><b>{event.node}</b><p>{event.summary}</p></div><aside>{event.model_id ? <Pill tone="info" icon="cpu">Mesh</Pill> : <Pill tone="neutral" icon="lock">Code</Pill>}<small>{event.latency_ms === null ? "—" : `${event.latency_ms} ms`}</small></aside></li>)}</ol> : <p className="muted">Upload a statement in Live Demo, process it, then return here to replay the run.</p>}
+          {agentRun ? <ol className="system-timeline">{agentRun.events.map((event, index) => <li key={event.id} className={index < visibleEvents ? "visible" : ""}><span>{event.sequence}</span><div><b>{event.node}</b><p>{event.summary}</p></div><aside>{event.model_id ? <Pill tone="info" icon="cpu">Mesh</Pill> : <Pill tone="neutral" icon="lock">Code</Pill>}<small>{event.latency_ms === null ? "—" : `${event.latency_ms} ms`}</small></aside></li>)}</ol> : <p className="muted">Upload a statement in Analyze, process it, then return here to replay the run.</p>}
         </Panel>
       )}
     </div>

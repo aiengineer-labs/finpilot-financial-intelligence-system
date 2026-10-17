@@ -1,8 +1,10 @@
 import type { AgentRun } from "@/lib/types";
+import { eventUsage, summarizeAgentUsage, usd } from "@/lib/agent-usage";
 import { humanize } from "@/lib/format";
 import { Icon } from "../ui/icons";
 
 export function Inspector({ run, visibleEvents, running, onClose }: { run: AgentRun | null; visibleEvents: number; running: boolean; onClose: () => void }) {
+  const totalUsage = run ? summarizeAgentUsage(run.events) : null;
   return (
     <aside className="glass inspector" aria-label="Agent log">
       <header className="inspector-head">
@@ -14,18 +16,19 @@ export function Inspector({ run, visibleEvents, running, onClose }: { run: Agent
       <div className="inspector-body">
         {!run ? (
           <p className="console-idle">{"// waiting for a verified run"}<br />{"// run the analysis, then ask the advisor"}</p>
-        ) : run.events.slice(0, visibleEvents).map((event) => (
-          <article key={event.id} className="log-entry">
+        ) : run.events.slice(0, visibleEvents).map((event) => {
+          const usage = eventUsage(event);
+          return <article key={event.id} className="log-entry">
             <time>[{String(event.sequence).padStart(2, "0")}]</time>
             <div>
               <b>{humanize(event.node)}</b>
               <p>{event.summary}</p>
-              <small>{event.model_id ? `Mesh · ${event.model_id} · ${event.output_tokens ?? 0} tok · ${event.latency_ms ?? 0} ms` : "deterministic · no model call"}</small>
+              <small>{event.model_id ? `Mesh · ${event.model_id} · ${event.output_tokens ?? 0} tok · ${event.latency_ms ?? 0} ms${usage.costUsd ? ` · ${usd(usage.costUsd)}` : ""}` : "deterministic · no model call"}</small>
             </div>
-          </article>
-        ))}
+          </article>;
+        })}
       </div>
-      {run && <footer className="inspector-foot"><span>{(run.total_input_tokens + run.total_output_tokens).toLocaleString("en-IN")} tokens</span><span>{(run.total_latency_ms / 1000).toFixed(1)} s</span><span>{humanize(run.verification_status)}</span></footer>}
+      {run && <footer className="inspector-foot"><span>{(run.total_input_tokens + run.total_output_tokens).toLocaleString("en-IN")} tokens</span><span>{usd(totalUsage?.costUsd ?? null)}</span><span>{humanize(run.verification_status)}</span></footer>}
     </aside>
   );
 }

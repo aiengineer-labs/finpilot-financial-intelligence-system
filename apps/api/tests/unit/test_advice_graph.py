@@ -1,6 +1,7 @@
 import json
 from typing import Any
 
+import pytest
 from pydantic import SecretStr
 
 from app.agents.specialists import AdvisorOutput
@@ -145,3 +146,61 @@ def test_verifier_rejects_wrong_currency_and_prohibited_certainty() -> None:
     assert status is VerificationStatus.REJECT
     assert "wrong currency" in " ".join(reasons)
     assert "prohibited certainty" in " ".join(reasons)
+
+
+class MeshShapedTransport(SequenceTransport):
+    """Usage as Mesh returns it: nested token details, a float cost and boolean flags."""
+
+    async def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        response = await super().post(path, payload)
+        response["usage"] = {
+            "prompt_tokens": 1200,
+            "completion_tokens": 300,
+            "total_tokens": 1500,
+            "byok_used": False,
+            "fallback_triggered": False,
+            "cost_usd": 0.00093,
+            "prompt_tokens_details": {"cached_tokens": 1024, "cache_write_tokens": 0},
+            "completion_tokens_details": {"reasoning_tokens": 180},
+        }
+        response["choices"][0]["finish_reason"] = "stop"
+        return response
+
+
+async def test_mesh_usage_shape_is_parsed_and_billed_cost_is_recorded() -> None:
+    draft = {
+        "recommendations": [
+            {
+                "title": "Keep a buffer",
+                "explanation": "The scenario minimum stays positive.",
+                "amount_minor": 550_000,
+                "currency": "INR",
+                "evidence_ids": ["scenario-1"],
+                "assumptions": [],
+                "confidence_bps": 8000,
+            }
+        ]
+    }
+    transport = MeshShapedTransport([_analysis(), draft])
+    state = await AdviceWorkflow(MeshClient(_settings(), transport)).run(
+        question="Can I afford it?", context=_context()
+    )
+    assert state["verification_status"] == VerificationStatus.ACCEPT.value
+    model_event = next(event for event in state["events"] if event["node"] == "behavior_analyst")
+    assert (model_event["input_tokens"], model_event["output_tokens"]) == (1200, 300)
+    assert model_event["details"]["cost_usd"] == "0.00093"
+    assert model_event["details"]["cached_input_tokens"] == 1024
+    assert model_event["details"]["reasoning_tokens"] == 180
+
+
+async def test_truncated_completion_fails_closed() -> None:
+    class TruncatedTransport(SequenceTransport):
+        async def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+            response = await super().post(path, payload)
+            response["choices"][0]["finish_reason"] = "length"
+            return response
+
+    with pytest.raises(ValueError, match="output token limit"):
+        await AdviceWorkflow(MeshClient(_settings(), TruncatedTransport([_analysis()]))).run(
+            question="Can I afford it?", context=_context()
+        )

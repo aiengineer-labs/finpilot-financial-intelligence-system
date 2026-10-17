@@ -3,7 +3,7 @@
 import { humanize } from "@/lib/format";
 import type { Account, Tenant, View } from "@/lib/types";
 import { Icon } from "../ui/icons";
-import { Avatar, Pill, hueFor } from "../ui/primitives";
+import { Avatar, hueFor } from "../ui/primitives";
 import { Brand } from "./brand";
 import { STAGES, type StageId, VIEWS } from "./shared";
 
@@ -34,7 +34,7 @@ export function Sidebar({ tenant, accounts, activeAccountId, busy, onSwitchAccou
 
       <div className="household">
         <Avatar label={tenant.name} hue={hueFor(tenant.name)} />
-        <div><b>{tenant.name}</b><small>isolated passwordless workspace</small></div>
+        <div><b>{tenant.name}</b><small>Financial analysis</small></div>
       </div>
 
       {accounts.length > 1 && (
@@ -62,12 +62,8 @@ export function Sidebar({ tenant, accounts, activeAccountId, busy, onSwitchAccou
       </nav>
 
       <div className="sidebar-foot">
-        <div className="demo-card">
-          <Pill tone="info" icon="lock">Secure statement workspace</Pill>
-          <small>No login, password, or bank connection required.</small>
-        </div>
-        <div className="pipeline-card">
-          <div className="pipeline-head"><b>Pipeline</b><span>{completed.size}/{STAGES.length}</span></div>
+        <div className={`pipeline-card ${busy ? "live" : ""}`}>
+          <div className="pipeline-head"><b><Icon name="advice" size={13} />Agent pipeline</b><span>{completed.size}/{STAGES.length}</span></div>
           <div className="progress"><i style={{ width: `${progress}%` }} /></div>
           <ol className="stage-list">
             {STAGES.map(([id, label]) => <li key={id} className={completed.has(id) ? "done" : ""}><span>{completed.has(id) ? <Icon name="check" size={11} /> : null}</span>{label}</li>)}
