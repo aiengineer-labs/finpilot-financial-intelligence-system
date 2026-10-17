@@ -2,7 +2,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject, TextStringObject
 
 from app.services.csv_ingestion import CSVColumnMapping
@@ -11,6 +11,8 @@ from app.services.statement_ingestion import (
     StatementFormat,
     StatementKind,
     StatementValidationError,
+    _extract_positioned_text,
+    _layout_pass,
     detect_statement_format,
     parse_statement,
 )
@@ -247,13 +249,13 @@ def test_continuation_page_without_header_keeps_dates_and_distinct_rows(flipped:
         (90, 750, "Transaction Details"),
         (470, 750, "Amount"),
         (530, 750, "Debit/Credit"),
-        *row(700, "19", "SwiggyInstamart", "13.00", "Credit"),
+        *row(700, "19", "Corner Grocery", "25.00", "Credit"),
     ]
     second_page = [
-        *row(740, "19", "SwiggyInstamart", "495.00", "Debit"),
-        *row(690, "13", "UPI/Wellness Store", "759.05", "Debit"),
-        *row(640, "08", "SwiggyInstamart", "495.00", "Debit"),
-        *row(590, "05", "Joining Fee", "500.00", "Debit"),
+        *row(740, "19", "Corner Grocery", "310.00", "Debit"),
+        *row(690, "13", "UPI/Wellness Store", "642.50", "Debit"),
+        *row(640, "08", "Corner Grocery", "310.00", "Debit"),
+        *row(590, "05", "Annual Fee", "750.00", "Debit"),
     ]
     result = parse_statement(
         positioned_pages_pdf([first_page, second_page], flipped=flipped),
@@ -265,11 +267,11 @@ def test_continuation_page_without_header_keeps_dates_and_distinct_rows(flipped:
     rows = result.transactions.rows
     assert result.transactions.duplicate_rows == 0
     assert [(row.transaction_date.date().isoformat(), row.amount_minor) for row in rows] == [
-        ("2025-05-19", 1_300),
-        ("2025-05-19", -49_500),
-        ("2025-05-13", -75_905),
-        ("2025-05-08", -49_500),
-        ("2025-05-05", -50_000),
+        ("2025-05-19", 2_500),
+        ("2025-05-19", -31_000),
+        ("2025-05-13", -64_250),
+        ("2025-05-08", -31_000),
+        ("2025-05-05", -75_000),
     ]
 
 
@@ -297,16 +299,16 @@ def _centered_row(
 def test_savings_pdf_with_vertically_centered_rows(flipped: bool, single_line_first: bool) -> None:
     # Layout of a real savings statement: DATE | MODE | PARTICULARS | DEPOSITS |
     # WITHDRAWALS | BALANCE, a B/F opening row, and date/amounts centred in each row.
-    payee = ["Synthetic Payee One", "UPI/payee/bharatpe/Pay to", "Bha/YesBank_Ye/0001", "67d1a8"]
+    payee = ["Synthetic Payee One", "UPI/payee/merchantpay/Pay to", "Bank_Ref/0001", "ref-0001"]
     salary = ["SALARY ACME PAYROLL"]
     first, second = (salary, payee) if single_line_first else (payee, salary)
     amounts = {
-        "payee": {"withdrawal": "170.00"},
+        "payee": {"withdrawal": "185.00"},
         "salary": {"deposit": "25,000.00"},
     }
     first_kind, second_kind = ("salary", "payee") if single_line_first else ("payee", "salary")
     first_balance, second_balance = (
-        ("91,879.16", "91,709.16") if single_line_first else ("66,709.16", "91,709.16")
+        ("76,000.00", "75,815.00") if single_line_first else ("50,815.00", "75,815.00")
     )
     page_one = [
         (20, 740, "Explore our Rewards Credit Card with a higher credit limit"),
@@ -320,28 +322,28 @@ def test_savings_pdf_with_vertically_centered_rows(flipped: bool, single_line_fi
         (420, 650, "DEPOSITS"),
         (490, 650, "WITHDRAWALS"),
         (604, 650, "BALANCE"),
-        *_centered_row(632, "01-08-2026", ["B/F"], balance="66,879.16"),
+        *_centered_row(632, "01-08-2026", ["B/F"], balance="51,000.00"),
         *_centered_row(612, "01-08-2026", first, balance=first_balance, **amounts[first_kind]),
         *_centered_row(560, "02-08-2026", second, balance=second_balance, **amounts[second_kind]),
         *_centered_row(
             510,
             "13-08-2026",
-            ["CAMPUS CANTEEN 13", "UPI/CANTEEN/q2125@ybl/UPI", "L/657983598852/"],
-            withdrawal="140.00",
-            balance="91,569.16",
+            ["CAMPUS CANTEEN 13", "UPI/CANTEEN/canteen@upi/UPI", "REF/000000000013/"],
+            withdrawal="95.00",
+            balance="75,720.00",
         ),
     ]
     page_two = [
         *_centered_row(
             760,
             "31-08-2026",
-            ["BOB FINANCIAL SOLUTIONS LIMITED", "UPI/BOB FINANC/amzn-detpls8s2/UPI/Amazon"],
-            withdrawal="1,575.00",
-            balance="89,994.16",
+            ["SYNTHETIC CARD SERVICES LIMITED", "UPI/CARD SERV/autopay-0001/UPI/Store"],
+            withdrawal="1,200.00",
+            balance="74,520.00",
         ),
         (20, 700, "Total"),
         (424, 700, "25,000.00"),
-        (500, 700, "1,885.00"),
+        (500, 700, "1,480.00"),
         (20, 660, "Page 2 of 2"),
     ]
     result = parse_statement(
@@ -356,16 +358,120 @@ def test_savings_pdf_with_vertically_centered_rows(flipped: bool, single_line_fi
     assert result.statement_kind is StatementKind.DEPOSIT
     rows = result.transactions.rows
     by_amount = {row.amount_minor: row for row in rows}
-    assert sorted(by_amount) == [-157_500, -17_000, -14_000, 2_500_000]
-    assert by_amount[-17_000].description == (
-        "Synthetic Payee One UPI/payee/bharatpe/Pay to Bha/YesBank_Ye/0001 67d1a8"
+    assert sorted(by_amount) == [-120_000, -18_500, -9_500, 2_500_000]
+    assert by_amount[-18_500].description == (
+        "Synthetic Payee One UPI/payee/merchantpay/Pay to Bank_Ref/0001 ref-0001"
     )
-    assert by_amount[-14_000].description == (
-        "CAMPUS CANTEEN 13 UPI/CANTEEN/q2125@ybl/UPI L/657983598852/"
+    assert by_amount[-9_500].description == (
+        "CAMPUS CANTEEN 13 UPI/CANTEEN/canteen@upi/UPI REF/000000000013/"
     )
-    assert by_amount[-14_000].transaction_date.date().isoformat() == "2026-08-13"
-    assert by_amount[-157_500].balance_minor == 8_999_416
+    assert by_amount[-9_500].transaction_date.date().isoformat() == "2026-08-13"
+    assert by_amount[-120_000].balance_minor == 7_452_000
     assert by_amount[2_500_000].description == "SALARY ACME PAYROLL"
+
+
+def single_block_pages_pdf(pages: list[list[tuple[float, float, str]]]) -> bytes:
+    """Draw each page in one BT block from three-character glyph pieces.
+
+    Some statement generators work this way; pypdf's text visitor then returns each visual
+    line, header included, as a single run with no column positions.
+    """
+    writer = PdfWriter()
+    font = writer._add_object(
+        DictionaryObject(
+            {
+                NameObject("/Type"): NameObject("/Font"),
+                NameObject("/Subtype"): NameObject("/Type1"),
+                NameObject("/BaseFont"): NameObject("/Helvetica"),
+            }
+        )
+    )
+    for items in pages:
+        page = writer.add_blank_page(width=700, height=792)
+        page[NameObject("/Resources")] = DictionaryObject(
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})}
+        )
+        operations = ["BT", "/F1 7 Tf"]
+        for x, y, text in items:
+            operations.append(f"1 0 0 1 {x} {y} Tm")
+            for start in range(0, len(text), 3):
+                piece = text[start : start + 3]
+                escaped = piece.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+                operations.append(f"({escaped}) Tj")
+        operations.append("ET")
+        stream = DecodedStreamObject()
+        stream.set_data("\n".join(operations).encode())
+        page[NameObject("/Contents")] = writer._add_object(stream)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def test_statement_drawn_in_glyph_pieces_keeps_columns_on_every_page() -> None:
+    header = [
+        (20, 650, "DATE"),
+        (70, 650, "MODE"),
+        (140, 650, "PARTICULARS"),
+        (420, 650, "DEPOSITS"),
+        (490, 650, "WITHDRAWALS"),
+        (604, 650, "BALANCE"),
+    ]
+    page_one = [
+        (20, 700, "Statement of Transactions in Savings Account XXXX0001"),
+        *header,
+        *_centered_row(632, "01-08-2026", ["B/F"], balance="51,000.00"),
+        *_centered_row(
+            612,
+            "01-08-2026",
+            ["Synthetic Payee One", "UPI/payee/merchantpay/Pay to", "Bank_Ref/0001"],
+            withdrawal="185.00",
+            balance="50,815.00",
+        ),
+    ]
+    # Page 2 places the title directly above the repeated header.
+    page_two = [
+        (20, 667, "Statement of Transactions in Savings Account XXXX0001"),
+        *header,
+        *_centered_row(
+            632,
+            "02-08-2026",
+            ["SALARY ACME PAYROLL", "NEFT/ACME/0002"],
+            deposit="25,000.00",
+            balance="75,815.00",
+        ),
+        *_centered_row(
+            600,
+            "03-08-2026",
+            ["CAMPUS CANTEEN 13", "UPI/CANTEEN/canteen@upi/UPI", "REF/000000000013/"],
+            withdrawal="95.00",
+            balance="75,720.00",
+        ),
+    ]
+    content = single_block_pages_pdf([page_one, page_two])
+    reader = PdfReader(BytesIO(content))
+    visitor_runs = [f.text for f in _extract_positioned_text(reader.pages[0], 1, 1000)]
+    # The fixture reproduces the defect: the public visitor merges the header row.
+    assert any(run.startswith("DATE MODE PARTICULARS") for run in visitor_runs)
+
+    result = parse_statement(
+        content,
+        filename="savings.pdf",
+        claimed_content_type="application/pdf",
+        mapping=_mapping(),
+    )
+    rows = result.transactions.rows
+    assert result.extraction_method == "embedded_column_table"
+    assert [(row.transaction_date.date().isoformat(), row.amount_minor) for row in rows] == [
+        ("2026-08-01", -18_500),
+        ("2026-08-02", 2_500_000),
+        ("2026-08-03", -9_500),
+    ]
+    assert [row.balance_minor for row in rows] == [5_081_500, 7_581_500, 7_572_000]
+    assert rows[1].description == "SALARY ACME PAYROLL NEFT/ACME/0002"
+    assert rows[0].description == (
+        "Synthetic Payee One UPI/payee/merchantpay/Pay to Bank_Ref/0001"
+    )
+    assert [result.source_evidence[row.fingerprint]["page"] for row in rows] == [1, 2, 2]
 
 
 def test_card_statement_markers_classify_the_statement_kind() -> None:
@@ -379,7 +485,7 @@ def test_card_statement_markers_classify_the_statement_kind() -> None:
         (540, 750, "Debit/Credit"),
         (40, 700, "08 Jun '25"),
         (120, 700, "UPI/Grocery Market"),
-        (460, 700, "716.00"),
+        (460, 700, "420.00"),
         (540, 700, "Debit"),
     )
     result = parse_statement(
@@ -389,7 +495,7 @@ def test_card_statement_markers_classify_the_statement_kind() -> None:
         mapping=_mapping(),
     )
     assert result.statement_kind is StatementKind.CREDIT_CARD
-    assert [row.amount_minor for row in result.transactions.rows] == [-71_600]
+    assert [row.amount_minor for row in result.transactions.rows] == [-42_000]
     assert all(row.balance_minor is None for row in result.transactions.rows)
 
 
@@ -567,3 +673,25 @@ def test_rejects_double_extensions_and_oversized_content() -> None:
     with pytest.raises(StatementValidationError) as too_large:
         detect_statement_format(b"a" * (5 * 1024 * 1024 + 1))
     assert too_large.value.code == "FILE_TOO_LARGE"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        statement_pdf("Date,Debit,Credit,Merchant", "01/10/2026,,100.00,ACME Payroll"),
+        positioned_statement_pdf((40, 750, "Date"), (120, 750, "Details"), flipped=True),
+        single_block_pages_pdf(
+            [[(20, 700, "DATE"), (140, 700, "PARTICULARS"), (20, 680, "01-08")]]
+        ),
+    ],
+    ids=["text-lines", "flipped-positioned", "glyph-pieces"],
+)
+def test_single_layout_pass_matches_pypdf_layout_text(content: bytes) -> None:
+    # The one-pass engine must render exactly what pypdf's public layout extraction does,
+    # so an internal pypdf change is caught here rather than in production parsing.
+    page = PdfReader(BytesIO(content)).pages[0]
+    result = _layout_pass(page)
+    assert result is not None
+    text, pieces = result
+    assert text == page.extract_text(extraction_mode="layout")
+    assert pieces

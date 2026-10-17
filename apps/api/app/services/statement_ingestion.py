@@ -5,15 +5,17 @@ from __future__ import annotations
 import csv
 import io
 import re
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
-from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject
+from pypdf.generic import ArrayObject, ContentStream, DictionaryObject, IndirectObject
 
 from app.services.csv_ingestion import (
     MAX_UPLOAD_BYTES,
@@ -109,6 +111,8 @@ class _PositionedText:
     # False when the page's transformation matrix flips the y axis, so a larger text-matrix
     # y is lower on the page (common in HTML-to-PDF output).
     y_up: bool = True
+    # Exact x where the text ends, when known from the text-show operator.
+    right: float | None = None
 
 
 def _normalized_content_type(content_type: str | None) -> str:
@@ -310,6 +314,158 @@ def _extract_positioned_text(
     return fragments
 
 
+@dataclass(frozen=True)
+class _TextPiece:
+    text: str
+    x: float
+    right: float
+    y: float
+    height: float
+    space: float
+    y_up: bool
+
+
+def _layout_pass(page: Any) -> tuple[str, list[_TextPiece]] | None:
+    """Run pypdf's layout engine once: layout text plus one record per text operator.
+
+    The records carry exact page coordinates and decoded text, which pypdf's public text
+    visitor loses when it merges a visual line into one run. This uses internal pypdf API,
+    so it returns None on any mismatch and the caller uses the public extractors instead.
+    The layout text equals ``page.extract_text(extraction_mode="layout")``.
+    """
+
+    try:
+        from pypdf._text_extraction._layout_mode import _fixed_width_page as layout
+        from pypdf._text_extraction._layout_mode._text_state_manager import TextStateManager
+        from pypdf.generic import ArrayObject as _Array
+        from pypdf.generic import StreamObject
+    except ImportError:
+        return None
+    try:
+        contents = page.get("/Contents")
+        if contents is not None:
+            contents = contents.get_object()
+        if not isinstance(contents, (_Array, StreamObject)):
+            return "", []
+        fonts = page._layout_mode_fonts()
+        operations = iter(ContentStream(contents, page.pdf, "bytes").operations)
+        state = TextStateManager()
+        groups: list[Any] = []
+        records: list[Any] = []
+        for operands, operator in operations:
+            if operator in (b"BT", b"q"):
+                target: Literal[b"Q", b"ET"] = b"ET" if operator == b"BT" else b"Q"
+                shown_groups, shown = layout.recurse_to_target_op(
+                    operations, state, target, fonts, True
+                )
+                groups.extend(shown_groups)
+                records.extend(shown)
+            elif operator == b"Tf":
+                state.set_font(layout.resolve_font(fonts, operands[0]), operands[1])
+            else:
+                state.set_state_param(operator, operands)
+        text = ""
+        if groups:
+            # Same normalisation and rendering as pypdf's own layout extraction.
+            min_x = min((group["tx"] for group in groups), default=0.0)
+            ordered: list[Any] = [
+                dict(group, tx=group["tx"] - min_x, displaced_tx=group["displaced_tx"] - min_x)
+                for group in sorted(
+                    groups, key=lambda item: (item["ty"] * item["flip_sort"], -item["tx"]),
+                    reverse=True,
+                )
+            ]
+            lines = layout.y_coordinate_groups(ordered, None)
+            text = layout.fixed_width_page(lines, layout.fixed_char_width(ordered, 1.25), True, 1)
+        return text, _text_pieces(records)
+    except Exception:
+        return None
+
+
+def _text_pieces(records: list[Any]) -> list[_TextPiece]:
+    pieces: list[_TextPiece] = []
+    previous: tuple[float, float, float] | None = None  # recorded tx, ty, true right
+    for record in records:
+        if record.rotated:
+            continue
+        x, right, y = float(record.tx), float(record.displaced_tx), float(record.ty)
+        # pypdf records back-to-back operators (no move between them) at the line's
+        # starting tx; place such a piece where the previous one ended.
+        continues = previous is not None and abs(x - previous[0]) < 1e-6
+        if previous is not None and continues and abs(y - previous[1]) < 1e-6:
+            shift = previous[2] - x
+            x, right = x + shift, right + shift
+        previous = (float(record.tx), y, right)
+        height = max(float(record.font_height), 1.0)
+        space = abs(float(record.space_tx) * float(record.transform[0]))
+        pieces.append(
+            _TextPiece(
+                text=str(record.text),
+                x=x,
+                right=right,
+                y=y,
+                height=height,
+                space=max(space, height * 0.2),
+                y_up=not record.flip_vertical,
+            )
+        )
+    return pieces
+
+
+def _extract_text_cells(
+    pieces: list[_TextPiece], page_number: int, fragment_budget: int
+) -> list[_PositionedText]:
+    """Rebuild table cells from exact per-operator text positions.
+
+    Some generators draw every glyph cluster with its own move. pypdf's text visitor then
+    returns a whole visual line as one run ("DATE MODE PARTICULARS ..."), hiding the
+    columns. Joining operator pieces by their measured gaps restores words and cells.
+    """
+
+    usable = sorted((piece for piece in pieces if piece.text.strip()), key=lambda p: (-p.y, p.x))
+    if len(usable) > fragment_budget:
+        raise StatementValidationError(
+            "PDF_TEXT_FRAGMENT_LIMIT",
+            "The PDF contains too many independently positioned text fragments",
+        )
+    lines: list[list[_TextPiece]] = []
+    for piece in usable:
+        if lines and abs(lines[-1][0].y - piece.y) <= max(piece.height * 0.3, 0.5):
+            lines[-1].append(piece)
+        else:
+            lines.append([piece])
+    cells: list[_PositionedText] = []
+    for line in lines:
+        cell: _PositionedText | None = None
+        open_space = False  # the previous piece ended with a space character
+        for piece in sorted(line, key=lambda item: item.x):
+            text = piece.text.strip()
+            if cell is not None and cell.right is not None:
+                gap = piece.x - cell.right
+                if -piece.height * 0.5 <= gap <= piece.space * 1.6:
+                    spaced = open_space or piece.text[:1].isspace() or gap > piece.space * 0.4
+                    joiner = " " if spaced else ""
+                    cell = replace(
+                        cell, text=f"{cell.text}{joiner}{text}", right=max(cell.right, piece.right)
+                    )
+                    open_space = piece.text[-1:].isspace()
+                    continue
+                cells.append(cell)
+            open_space = piece.text[-1:].isspace()
+            cell = _PositionedText(
+                page=page_number,
+                x=piece.x,
+                y=piece.y,
+                font_size=piece.height,
+                text=text,
+                y_up=piece.y_up,
+                right=piece.right,
+            )
+        if cell is not None:
+            cells.append(cell)
+    return [replace(cell, text=_normalized_fragment(cell.text)) for cell in cells]
+
+
 def _format_statement_date(raw: str, output_format: str) -> str | None:
     day_month = _DAY_MONTH_PATTERN.search(raw)
     year_match = _YEAR_PATTERN.search(raw)
@@ -489,9 +645,15 @@ class _PdfLine:
     direction: str | None
 
 
-def _estimated_center(fragment: _PositionedText) -> float:
+def _estimated_right(fragment: _PositionedText) -> float:
+    if fragment.right is not None:
+        return fragment.right
     # Helvetica-like glyphs average roughly half an em in width.
-    return fragment.x + len(fragment.text) * fragment.font_size * 0.25
+    return fragment.x + len(fragment.text) * fragment.font_size * 0.5
+
+
+def _estimated_center(fragment: _PositionedText) -> float:
+    return (fragment.x + _estimated_right(fragment)) / 2
 
 
 def _pdf_lines(fragments: list[_PositionedText]) -> list[list[_PositionedText]]:
@@ -516,7 +678,7 @@ def _line_labels(line: list[_PositionedText]) -> list[tuple[str, float, float]]:
     labels: list[tuple[str, float, float]] = []
     previous_end = float("-inf")
     for fragment in line:
-        end = fragment.x + len(fragment.text) * fragment.font_size * 0.5
+        end = _estimated_right(fragment)
         adjacent = labels and fragment.x - previous_end <= fragment.font_size * 1.5
         # Two complete labels ("Withdrawal Amt." "Deposit Amt.") stay separate columns.
         if adjacent and (column_role(labels[-1][0]) is None or column_role(fragment.text) is None):
@@ -539,7 +701,13 @@ def _header_columns(
         below_is_data = any(
             _PDF_AMOUNT.fullmatch(fragment.text.replace(" ", "")) for fragment in below
         )
-        if gap <= max(lines[index][0].font_size * 2.5, 12.0) and not below_is_data:
+        below_labels = [label for label, _, _ in _line_labels(below)]
+        # Only a top line that itself names columns can be the first half of a header;
+        # a title above a complete header must not be merged into it.
+        top_names_columns = bool(assign_roles([label for label, _, _ in labels]))
+        below_is_header = is_transaction_header(assign_roles(below_labels))
+        close = gap <= max(lines[index][0].font_size * 2.5, 12.0)
+        if close and top_names_columns and not below_is_header and not below_is_data:
             # Two-line headers such as "Withdrawal" over "Amount (INR)".
             merged = list(labels)
             for text, left, center in _line_labels(below):
@@ -556,14 +724,16 @@ def _header_columns(
         roles = assign_roles([label for label, _, _ in candidate])
         if is_transaction_header(roles):
             names = {position: role for role, position in roles.items()}
-            # Unused columns (Chq./Ref.No., Value Dt) still bound their neighbours' text.
-            return (
-                {
-                    names.get(position, f"other{position}"): _PdfColumn(left=left, center=center)
-                    for position, (_, left, center) in enumerate(candidate)
-                },
-                consumed,
-            )
+            named_lefts = [candidate[position][1] for position in names]
+            columns: dict[str, _PdfColumn] = {}
+            for position, (_, left, center) in enumerate(candidate):
+                name = names.get(position)
+                # Unused columns (Chq./Ref.No., Value Dt) still bound their neighbours' text,
+                # unless they coincide with a named column.
+                if name is None and any(abs(left - other) <= 2.0 for other in named_lefts):
+                    continue
+                columns[name or f"other{position}"] = _PdfColumn(left=left, center=center)
+            return columns, consumed
     return None
 
 
@@ -834,6 +1004,64 @@ def _columnar_pdf_table_as_csv(
     return buffer.getvalue().encode("utf-8"), source_locations
 
 
+_TableAdapter = tuple[str, str | None, Callable[[], tuple[bytes, list[dict[str, int | str]]]]]
+
+
+def _first_pdf_table(
+    page_texts: list[str],
+    positioned_pages: list[list[_PositionedText]],
+    cell_pages: list[list[_PositionedText]] | None,
+    mapping: CSVColumnMapping,
+) -> tuple[str, str | None, bytes, list[dict[str, int | str]]]:
+    """Try each bounded table adapter in order of specificity and keep the first success."""
+
+    adapters: list[_TableAdapter] = [
+        ("embedded_text", None, lambda: _delimited_pdf_table_as_csv(page_texts, mapping)),
+        (
+            "embedded_aligned_columns",
+            "Parsed a visually aligned transaction table",
+            lambda: _aligned_pdf_table_as_csv(positioned_pages, mapping),
+        ),
+    ]
+    # Exact operator-level cells first; the public visitor runs remain a fallback.
+    for pages in ([cell_pages] if cell_pages is not None else []) + [positioned_pages]:
+        adapters.append(
+            (
+                "embedded_column_table",
+                "Parsed a column-aligned transaction table",
+                partial(_columnar_pdf_table_as_csv, pages, page_texts, mapping),
+            )
+        )
+    if cell_pages is not None:
+        adapters.append(
+            (
+                "embedded_aligned_columns",
+                "Parsed a visually aligned transaction table",
+                partial(_aligned_pdf_table_as_csv, cell_pages, mapping),
+            )
+        )
+    found_header = False
+    for method, warning, adapter in adapters:
+        try:
+            csv_content, source_locations = adapter()
+        except StatementValidationError as exc:
+            if exc.code == "PDF_NO_TRANSACTIONS":
+                found_header = True
+            elif exc.code != "PDF_TABLE_NOT_FOUND":
+                raise
+            continue
+        return method, warning, csv_content, source_locations
+    if found_header:
+        raise StatementValidationError(
+            "PDF_NO_TRANSACTIONS", "The PDF transaction table does not contain any readable rows"
+        )
+    raise StatementValidationError(
+        "PDF_TABLE_NOT_FOUND",
+        "No supported transaction table was found. The PDF needs recognizable date, "
+        "description, and amount or withdrawal/deposit columns",
+    )
+
+
 def _reject_active_pdf_objects(value: object) -> None:
     pending: list[tuple[object, int]] = [(value, 0)]
     visited: set[tuple[int, int]] = set()
@@ -887,10 +1115,16 @@ def _parse_pdf(content: bytes, mapping: CSVColumnMapping) -> ParsedStatement:
         _reject_active_pdf_objects(reader.trailer)
         page_texts: list[str] = []
         positioned_pages: list[list[_PositionedText]] = []
+        cell_pages: list[list[_PositionedText]] | None = []
         extracted_chars = 0
         extracted_fragments = 0
         for page_number, page in enumerate(reader.pages, start=1):
-            text = page.extract_text(extraction_mode="layout") or ""
+            layout_result = _layout_pass(page)
+            if layout_result is None:
+                text = page.extract_text(extraction_mode="layout") or ""
+                cell_pages = None
+            else:
+                text, pieces = layout_result
             extracted_chars += len(text)
             if extracted_chars > MAX_EXTRACTED_TEXT_CHARS:
                 raise StatementValidationError(
@@ -902,6 +1136,11 @@ def _parse_pdf(content: bytes, mapping: CSVColumnMapping) -> ParsedStatement:
             )
             extracted_fragments += len(fragments)
             positioned_pages.append(fragments)
+            if cell_pages is not None and layout_result is not None:
+                cells = _extract_text_cells(
+                    pieces, page_number, MAX_POSITIONED_TEXT_FRAGMENTS - extracted_fragments
+                )
+                cell_pages.append(cells)
     except StatementValidationError:
         raise
     except (PdfReadError, RecursionError, ValueError) as exc:
@@ -919,25 +1158,10 @@ def _parse_pdf(content: bytes, mapping: CSVColumnMapping) -> ParsedStatement:
             "This appears to be a scanned PDF. OCR is intentionally not enabled for "
             "untrusted uploads",
         )
-    extraction_method = "embedded_text"
-    warnings: list[str] = []
-    try:
-        csv_content, source_locations = _delimited_pdf_table_as_csv(page_texts, mapping)
-    except StatementValidationError as exc:
-        if exc.code != "PDF_TABLE_NOT_FOUND":
-            raise
-        try:
-            csv_content, source_locations = _aligned_pdf_table_as_csv(positioned_pages, mapping)
-            extraction_method = "embedded_aligned_columns"
-            warnings.append("Parsed a visually aligned transaction table")
-        except StatementValidationError as aligned_exc:
-            if aligned_exc.code not in {"PDF_TABLE_NOT_FOUND", "PDF_NO_TRANSACTIONS"}:
-                raise
-            csv_content, source_locations = _columnar_pdf_table_as_csv(
-                positioned_pages, page_texts, mapping
-            )
-            extraction_method = "embedded_column_table"
-            warnings.append("Parsed a column-aligned transaction table")
+    extraction_method, warning, csv_content, source_locations = _first_pdf_table(
+        page_texts, positioned_pages, cell_pages, mapping
+    )
+    warnings = [warning] if warning else []
     transactions = parse_csv(csv_content, mapping)
     return ParsedStatement(
         format=StatementFormat.PDF,

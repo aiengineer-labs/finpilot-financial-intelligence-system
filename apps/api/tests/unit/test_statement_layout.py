@@ -62,15 +62,15 @@ def test_card_export_signs_unmarked_charges_as_debits() -> None:
     content = """Synthetic Card Services
 Credit Card Number,XXXX XXXX XXXX 0001
 Transaction Date,Transaction Details,Amount (INR)
-08-Jun-2025,UPI/Grocery Market,₹ 716.00
-05-Jun-2025,Online Course LLP,"6,239.00"
-11-Jun-2025,UPI PAYMENT RECEIVED,134.00 Cr
+08-Jun-2025,UPI/Grocery Market,₹ 420.00
+05-Jun-2025,Online Course LLP,"3,150.00"
+11-Jun-2025,UPI PAYMENT RECEIVED,75.00 Cr
 """.encode()
     result = _parse(content)
 
     assert result.statement_kind is StatementKind.CREDIT_CARD
     assert result.mapping.direction == "Direction"
-    assert [row.amount_minor for row in result.transactions.rows] == [-71_600, -623_900, 13_400]
+    assert [row.amount_minor for row in result.transactions.rows] == [-42_000, -315_000, 7_500]
     assert all(row.balance_minor is None for row in result.transactions.rows)
 
 
@@ -153,24 +153,24 @@ def test_money_parser_accepts_currency_marks_and_suffixes() -> None:
         (
             "S No.,Value Date,Transaction Date,Cheque Number,Transaction Remarks,"
             "Withdrawal Amount (INR ),Deposit Amount (INR ),Balance (INR )",
-            '1,01/08/2026,01/08/2026,-,UPI/Grocer/okicici,170.00,0.00,"66,709.16"',
-            '2,02/08/2026,02/08/2026,-,NEFT-SALARY ACME,0.00,"25,000.00","91,709.16"',
+            '1,01/08/2026,01/08/2026,-,UPI/Grocer/okicici,170.00,0.00,"50,830.00"',
+            '2,02/08/2026,02/08/2026,-,NEFT-SALARY ACME,0.00,"25,000.00","75,830.00"',
         ),
         (
             "Txn Date,Value Date,Description,Ref No./Cheque No.,Debit,Credit,Balance",
-            '1 Aug 2026,1 Aug 2026,TO TRANSFER-UPI/Grocer,TRANSFER TO 0001, 170.00,,"66,709.16"',
-            '2 Aug 2026,2 Aug 2026,BY TRANSFER-NEFT SALARY ACME,0002,," 25,000.00","91,709.16"',
+            '1 Aug 2026,1 Aug 2026,TO TRANSFER-UPI/Grocer,TRANSFER TO 0001, 170.00,,"50,830.00"',
+            '2 Aug 2026,2 Aug 2026,BY TRANSFER-NEFT SALARY ACME,0002,," 25,000.00","75,830.00"',
         ),
         (
             "Tran Date,CHQNO,PARTICULARS,DR,CR,BAL,SOL",
-            "01-08-2026,,UPI/P2M/Grocer,170.00,,66709.16,0001",
-            "02-08-2026,,NEFT/SALARY ACME,,25000.00,91709.16,0001",
+            "01-08-2026,,UPI/P2M/Grocer,170.00,,50830.00,0001",
+            "02-08-2026,,NEFT/SALARY ACME,,25000.00,75830.00,0001",
         ),
         (
             "Sl. No.,Transaction Date,Value Date,Description,Chq / Ref No.,Amount,Dr / Cr,"
             "Balance,Dr / Cr",
-            "1,01-08-2026,01-08-2026,UPI/Grocer,UPI-0001,170.00,DR,66709.16,CR",
-            "2,02-08-2026,02-08-2026,NEFT SALARY ACME,NEFT-0002,25000.00,CR,91709.16,CR",
+            "1,01-08-2026,01-08-2026,UPI/Grocer,UPI-0001,170.00,DR,50830.00,CR",
+            "2,02-08-2026,02-08-2026,NEFT SALARY ACME,NEFT-0002,25000.00,CR,75830.00,CR",
         ),
     ],
     ids=["icici", "sbi", "axis", "kotak"],
@@ -185,7 +185,7 @@ def test_common_bank_csv_exports_are_recognized(
     assert result.statement_kind is StatementKind.DEPOSIT
     rows = result.transactions.rows
     assert [row.amount_minor for row in rows] == [-17_000, 2_500_000]
-    assert [row.balance_minor for row in rows] == [6_670_916, 9_170_916]
+    assert [row.balance_minor for row in rows] == [5_083_000, 7_583_000]
     assert [row.transaction_date.date().isoformat() for row in rows] == [
         "2026-08-01",
         "2026-08-02",
