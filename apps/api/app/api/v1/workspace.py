@@ -1,4 +1,4 @@
-"""Passwordless provisioning for the public synthetic FinPilot workspace."""
+"""Passwordless provisioning for an isolated FinPilot statement workspace."""
 
 from secrets import token_hex, token_urlsafe
 from typing import Annotated
@@ -22,13 +22,13 @@ async def bootstrap_workspace(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TokenResponse:
-    """Create an isolated synthetic workspace without accepting user credentials."""
+    """Create an isolated workspace without accepting user credentials or ledger data."""
     identity = token_hex(12)
     user = User(
         email=f"synthetic-{identity}@example.invalid",
         password_hash=hash_password(token_urlsafe(32)),
     )
-    tenant = Tenant(name="Synthetic demo household", slug=f"synthetic-{identity}")
+    tenant = Tenant(name="Private statement workspace", slug=f"workspace-{identity}")
     session.add_all([user, tenant])
     await session.flush()
     session.add(Membership(user_id=user.id, tenant_id=tenant.id, role=TenantRole.OWNER))

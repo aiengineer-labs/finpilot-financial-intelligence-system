@@ -5,7 +5,7 @@ import { addDays, compactMoney, money, shortDate } from "@/lib/format";
 
 /* Charts are hand-built SVG so the bundle stays dependency-free. Labels are rendered
    through React text nodes (never innerHTML) because merchant and category names come
-   from uploaded CSV data. */
+   from uploaded statement data. */
 
 function useElementWidth<T extends HTMLElement>() {
   const ref = useRef<T>(null);

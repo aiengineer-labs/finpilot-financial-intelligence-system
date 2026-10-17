@@ -29,7 +29,7 @@ export function Sidebar({ tenant, view, open, badges, completed, onNavigate, onC
 
       <div className="household">
         <Avatar label={tenant.name} hue={hueFor(tenant.name)} />
-        <div><b>{tenant.name}</b><small>isolated synthetic workspace</small></div>
+        <div><b>{tenant.name}</b><small>isolated passwordless workspace</small></div>
       </div>
 
       <nav className="nav">
@@ -49,8 +49,8 @@ export function Sidebar({ tenant, view, open, badges, completed, onNavigate, onC
 
       <div className="sidebar-foot">
         <div className="demo-card">
-          <Pill tone="info" icon="flask">Synthetic workspace</Pill>
-          <small>No login or financial credentials required.</small>
+          <Pill tone="info" icon="lock">Secure statement workspace</Pill>
+          <small>No login, password, or bank connection required.</small>
         </div>
         <div className="pipeline-card">
           <div className="pipeline-head"><b>Pipeline</b><span>{completed.size}/{STAGES.length}</span></div>

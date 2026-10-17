@@ -7,14 +7,14 @@ FinPilot is a production-oriented, tenant-isolated financial intelligence applic
 ## Working features
 
 - Passwordless synthetic-workspace entry in the web console; internal short-lived authorization and server-derived tenant isolation remain enforced by the API.
-- Idempotent CSV ingestion with explicit mappings, row errors, exact minor units, transfers/refunds, and correction lineage.
+- Content-validated CSV and text-PDF ingestion with explicit mappings, parser provenance, row errors, exact minor units, transfers/refunds, source evidence, and idempotent replay.
 - Recurrence, robust anomaly detection, immutable snapshots, chronological backtests, 30/60/90-day forecasts, and what-if branches.
 - Typed LangGraph analyst, advisor, critic, and verifier flow. All model inference uses Mesh; no provider fallback exists.
 - Deterministic input/tool policy, NeMo Guardrails, Presidio minimization, fail-closed output verification, and persisted audit events.
 - Versioned governance assets, risk/evaluation gates, human-review queue, exact recommendation lineage, and governance UI.
 - Durable timezone-aware weekly digests with signed Vercel Cron dispatch, SQL locking, dedupe keys, and in-app delivery audit.
 - Responsive glass-material product with distinct Live Demo, operational Console, and How it works modes; light/dark themes, ⌘K command palette, interactive SVG charts, and complete finance, audit, governance, and digest views.
-- Automatic synthetic demo and a versioned fictional household statement (`evaluation/datasets/synthetic_household_v1.csv`) that exercises the real ingestion, analytics, and validation paths without a login form.
+- Empty passwordless statement workspace plus an explicitly selected, upload-ready fictional bank CSV (`apps/web/public/samples/finpilot-demo-bank-statement.csv`) that exercises the real ingestion, analytics, and validation paths without preloaded financial values.
 
 ## Local quickstart
 
@@ -40,7 +40,8 @@ flowchart LR
   UI[Next.js operations console] -->|same-origin gateway + internal session| API[FastAPI]
   API --> AUTH[Membership boundary]
   AUTH --> DB[(PostgreSQL)]
-  API --> INGEST[CSV normalization]
+  API --> INTAKE[Bounded file validation]
+  INTAKE -->|detected CSV or PDF| INGEST[Statement normalization]
   INGEST --> ENGINE[Deterministic engines]
   ENGINE --> GRAPH[Bounded LangGraph]
   GRAPH --> RAILS[NeMo + Presidio]
@@ -78,7 +79,7 @@ docker compose config --quiet
 git diff --check
 ```
 
-The latest recorded local run passed 221 tests, strict typing, linting, Next production build, PostgreSQL migrations through `20261016_0006`, and browser smoke tests. The bounded offline Promptfoo corpus passed 184/184 cases (168 attacks and 16 legitimate controls). Detailed evidence is in [implementation status](docs/IMPLEMENTATION_STATUS.md) and [evaluation results](docs/evaluation/results.md).
+The latest verified command results, test count, migration head, and browser evidence are recorded in [implementation status](docs/IMPLEMENTATION_STATUS.md). The bounded offline Promptfoo corpus passed 184/184 cases (168 attacks and 16 legitimate controls). Detailed evaluation evidence is in [evaluation results](docs/evaluation/results.md).
 
 ## Deployment and limitations
 

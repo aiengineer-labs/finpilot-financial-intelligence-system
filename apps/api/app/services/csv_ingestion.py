@@ -44,6 +44,7 @@ class CSVColumnMapping(BaseModel):
 
 @dataclass(frozen=True)
 class ParsedTransaction:
+    source_row: int
     transaction_date: datetime
     amount_minor: int
     currency: str
@@ -225,6 +226,7 @@ def parse_csv(content: bytes, mapping: CSVColumnMapping) -> ParseResult:
             seen.add(fingerprint)
             parsed.append(
                 ParsedTransaction(
+                    source_row=row_number,
                     transaction_date=transaction_date,
                     amount_minor=amount_minor,
                     currency=currency,

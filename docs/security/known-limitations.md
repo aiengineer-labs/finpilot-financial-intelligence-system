@@ -8,4 +8,6 @@
 - Sparse or non-stationary transaction history limits forecast usefulness. Forecasts are estimates based on recorded data and assumptions, not guaranteed outcomes.
 - Access tokens are short-lived but refresh-token/session revocation infrastructure is not implemented.
 - The governance UI exposes current/historic records but not a visual configuration diff or automatic rollback button.
+- PDF ingestion currently supports bounded, embedded-text tables whose extracted header matches the explicit statement mapping. Image-only statements fail closed with `PDF_OCR_REQUIRED`; OCR is not enabled because no isolated, privacy-reviewed worker exists.
+- PDF validation is defense in depth, not malware immunity. The current application uses strict structural parsing, claim matching, active-content rejection, and resource budgets, but does not yet have a deployed antivirus/CDR service or process/container isolation for the parser. Public production intake remains blocked on those controls and load testing.
 

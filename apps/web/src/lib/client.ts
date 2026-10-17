@@ -1,10 +1,8 @@
 export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 
 export const SAMPLE_STATEMENT = {
-  path: "/samples/finpilot-synthetic-household-v1.csv",
-  filename: "finpilot-synthetic-household-v1.csv",
-  accountName: "Synthetic household account",
-  externalReference: "synthetic-household-v1"
+  path: "/samples/finpilot-demo-bank-statement.csv",
+  filename: "finpilot-demo-bank-statement.csv"
 } as const;
 
 /** Explicit bank column mapping for the bundled synthetic statement format. */
@@ -14,10 +12,11 @@ export const DEFAULT_MAPPING = JSON.stringify({
   currency: "Currency", balance: "Balance"
 });
 
-type Detail = string | Array<{ msg?: string; loc?: Array<string | number> }> | undefined;
+type Detail = string | { code?: string; message?: string } | Array<{ msg?: string; loc?: Array<string | number> }> | undefined;
 
 function describe(detail: Detail, status: number) {
   if (typeof detail === "string") return detail;
+  if (detail && !Array.isArray(detail)) return detail.message ?? detail.code ?? `Request failed (${status})`;
   if (Array.isArray(detail) && detail.length) {
     return detail.map((item) => [item.loc?.slice(1).join("."), item.msg].filter(Boolean).join(": ")).join("; ");
   }

@@ -71,7 +71,7 @@ export function Ledger({ transactions, total, hasAccount, busy, uploadResult, on
             <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="largest">Largest amount</option>
           </select>
         </div>
-        {!transactions.length ? <EmptyState icon="ledger" title="No ledger rows yet">Import a statement above, or load the synthetic sample.</EmptyState> : !filtered.length ? <EmptyState icon="search" title="Nothing matches these filters" /> : (
+        {!transactions.length ? <EmptyState icon="ledger" title="No ledger rows yet">Import a bank CSV or supported PDF above, or explicitly use the fictional demo file.</EmptyState> : !filtered.length ? <EmptyState icon="search" title="Nothing matches these filters" /> : (
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>Date</th><th>Merchant</th><th>Category</th><th>Provenance</th><th className="num">Amount</th><th className="num hide-sm">Balance</th></tr></thead>
@@ -120,20 +120,20 @@ function ImportPanel({ hasAccount, busy, uploadResult, onUpload, onLoadSample, o
   return (
     <>
       <Panel className="span-7">
-        <PanelHeader eyebrow="CSV INGESTION" title="Import a statement" subtitle="Validated for encoding, explicit dates, exact amounts, duplicates and transfers" />
+        <PanelHeader eyebrow="SECURE STATEMENT INTAKE" title="Import a statement" subtitle="Content-validated before CSV or PDF parsing; exact amounts, duplicates and transfers stay deterministic" />
         {!hasAccount ? (
           <EmptyState icon="bank" title="No financial account yet" action={<button className="btn btn-primary" onClick={onCreateAccount} disabled={busy}><Icon name="plus" size={14} />Create primary account</button>}>Create an empty INR account first. No balance is invented.</EmptyState>
         ) : (
           <div className={`dropzone ${dragging ? "dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={drop}>
             <span className="dropzone-icon"><Icon name="upload" size={24} /></span>
-            <b>Drop a CSV statement here</b>
-            <small>UTF-8 · up to 5 MiB / 10,000 rows · columns Date, Debit, Credit, Merchant, Description, Transaction ID, Currency, Balance</small>
+            <b>Drop a CSV or text-based PDF statement here</b>
+            <small>Up to 5 MiB · PDF up to 25 pages · content must match its extension · mapped transaction columns required</small>
             <div className="button-row">
               <button className="btn btn-glass" onClick={() => input.current?.click()} disabled={busy}><Icon name="doc" size={14} />Choose file</button>
-              <button className="btn btn-primary" onClick={onLoadSample} disabled={busy}><Icon name="bolt" size={14} />{busy ? "Working…" : "Use synthetic sample"}</button>
+              <button className="btn btn-primary" onClick={onLoadSample} disabled={busy}><Icon name="flask" size={14} />{busy ? "Working…" : "Use fictional demo CSV"}</button>
             </div>
-            <a className="text-link" href={SAMPLE_STATEMENT.path} download><Icon name="download" size={13} />Download sample CSV</a>
-            <input ref={input} type="file" accept=".csv,text/csv" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) onUpload(file); event.target.value = ""; }} />
+            <a className="text-link" href={SAMPLE_STATEMENT.path} download><Icon name="download" size={13} />Download demo CSV template</a>
+            <input ref={input} type="file" accept=".csv,.pdf,text/csv,application/pdf" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) onUpload(file); event.target.value = ""; }} />
           </div>
         )}
       </Panel>
@@ -147,6 +147,7 @@ function ImportPanel({ hasAccount, busy, uploadResult, onUpload, onLoadSample, o
               <div className="counter bad"><strong>{uploadResult.rejected_rows}</strong><span>rejected</span></div>
             </div>
             {uploadResult.replayed && <p className="note"><Icon name="repeat" size={14} />Identical upload detected — the existing import was returned unchanged.</p>}
+            <p className="note"><Icon name="lock" size={14} />Detected {uploadResult.source_format.toUpperCase()} · {uploadResult.parser_name} v{uploadResult.parser_version}{uploadResult.page_count ? ` · ${uploadResult.page_count} pages` : ""} · {uploadResult.processing_duration_ms} ms</p>
             {uploadResult.row_errors.length > 0 && (
               <ul className="row-errors">
                 {uploadResult.row_errors.slice(0, 6).map((item, index) => <li key={index}><Pill tone="bad">Row {String(item.row ?? "?")}</Pill><span>{String(item.message ?? item.code ?? "Invalid row")}</span></li>)}
@@ -163,6 +164,11 @@ function TransactionSheet({ transaction, busy, onClose, onCorrect }: { transacti
   const [category, setCategory] = useState(transaction.category);
   const [reason, setReason] = useState("");
   const options = [...new Set([...KNOWN_CATEGORIES, transaction.category])];
+  const sourceEvidence = transaction.source_evidence.format === "pdf"
+    ? `PDF page ${transaction.source_evidence.page}, text line ${transaction.source_evidence.text_line}`
+    : transaction.source_evidence.format === "csv"
+      ? `CSV row ${transaction.source_evidence.row}`
+      : "Legacy import · row provenance unavailable";
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -184,6 +190,7 @@ function TransactionSheet({ transaction, busy, onClose, onCorrect }: { transacti
           <div><dt>Category</dt><dd><span className="category-tag"><i style={{ background: categoryColor(transaction.category) }} />{humanize(transaction.category)}</span></dd></div>
           <div><dt>Classification</dt><dd>{humanize(transaction.classification_method)} · {percentFromBps(transaction.classification_confidence_bps)}</dd></div>
           <div><dt>Balance after</dt><dd>{transaction.balance_minor === null ? "Not provided by source" : exactMoney(transaction.balance_minor, transaction.currency)}</dd></div>
+          <div><dt>Source evidence</dt><dd>{sourceEvidence}</dd></div>
           <div><dt>Ledger ID</dt><dd><code>{transaction.id}</code></dd></div>
         </dl>
         <form className="correction" onSubmit={submit}>

@@ -21,7 +21,7 @@ import { DEFAULT_MAPPING, SAMPLE_STATEMENT, type Session, request } from "@/lib/
 import { addDays, compactMoney, humanize, minorFromRupees } from "@/lib/format";
 import { deriveInsights } from "@/lib/insights";
 import type {
-  Account, AgentRun, DigestPreference, EvaluationRun, Forecast, GovernanceArtifact, GovernanceData,
+  Account, AgentRun, ArchitectureManifest, DigestPreference, EvaluationRun, Forecast, GovernanceArtifact, GovernanceData,
   GovernanceRisk, GovernanceSummary, HumanReview, Notification, Scenario, Snapshot, Tenant, Transaction,
   UploadResult, View
 } from "@/lib/types";
@@ -33,7 +33,7 @@ type ProductMode = "demo" | "console" | "system";
 const LEDGER_PAGE = 200;
 const LEDGER_CAP = 1000;
 const DEFAULT_QUESTION = "Can I afford this purchase without jeopardizing my cash buffer?";
-const INITIAL_CONFIG: RunConfig = { asOf: "", horizon: 30, scenarioEnabled: true, scenarioName: "Laptop purchase", scenarioAmount: "75000.00", scenarioDate: "" };
+const INITIAL_CONFIG: RunConfig = { asOf: "", horizon: 30, scenarioEnabled: false, scenarioName: "", scenarioAmount: "", scenarioDate: "" };
 
 function message(caught: unknown, fallback: string) {
   return caught instanceof Error ? caught.message : fallback;
@@ -91,6 +91,7 @@ export function ProductConsole() {
   const [governance, setGovernance] = useState<GovernanceData | null>(null);
   const [digestPreference, setDigestPreference] = useState<DigestPreference | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [architecture, setArchitecture] = useState<ArchitectureManifest | null>(null);
   const [config, setConfigState] = useState<RunConfig>(INITIAL_CONFIG);
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [busy, setBusy] = useState<Busy>(null);
@@ -143,6 +144,11 @@ export function ProductConsole() {
     setNotifications(delivered);
   }
 
+  async function loadArchitecture(scope: Session | undefined = auth) {
+    if (!scope) return;
+    setArchitecture(await request<ArchitectureManifest>("/api/v1/system/architecture", {}, scope));
+  }
+
   async function loadWorkspace(scope: Session) {
     const [nextAccounts, ledger] = await Promise.all([request<Account[]>("/api/v1/accounts", {}, scope), fetchLedger(scope)]);
     setAccounts(nextAccounts);
@@ -150,9 +156,9 @@ export function ProductConsole() {
     setTransactionTotal(ledger.total);
     const known = ledger.items.find((item) => item.balance_minor !== null);
     if (known) setConfig({ asOf: known.transaction_date });
-    const results = await Promise.allSettled([loadGovernance(scope), loadDigests(scope)]);
+    const results = await Promise.allSettled([loadGovernance(scope), loadDigests(scope), loadArchitecture(scope)]);
     const failed = results.find((result) => result.status === "rejected");
-    if (failed) push({ tone: "error", title: "Some workspace panels could not load", body: message(failed.reason, "Governance or digest data is unavailable") });
+    if (failed) push({ tone: "error", title: "Some workspace panels could not load", body: message(failed.reason, "Governance, digest, or architecture data is unavailable") });
   }
 
   async function openSession(token: string) {
@@ -169,16 +175,9 @@ export function ProductConsole() {
     try {
       const { access_token: token } = await request<{ access_token: string }>("/api/v1/workspace/bootstrap", { method: "POST" });
       const { scope, tenant } = await openSession(token);
-      const account = await request<Account>("/api/v1/accounts", {
-        method: "POST",
-        body: JSON.stringify({ name: SAMPLE_STATEMENT.accountName, currency: "INR", external_reference: SAMPLE_STATEMENT.externalReference })
-      }, scope);
-      const result = await uploadStatement(scope, account.id, await sampleFile());
-      setUploadResult(result);
       await loadWorkspace(scope);
       setSession({ token, tenant });
-      navigate("overview");
-      push({ tone: "success", title: "Synthetic household ready", body: `${result.accepted_rows} rows imported · ${result.duplicate_rows} duplicate · ${result.rejected_rows} rejected. Next: Run analysis.` });
+      setMode("demo");
     } catch (caught) {
       setStartupError(message(caught, "Could not open the synthetic workspace"));
     } finally {
@@ -314,7 +313,7 @@ export function ProductConsole() {
       const run = await request<AgentRun>("/api/v1/agent-runs", { method: "POST", body: JSON.stringify({ forecast_id: baseline.id, scenario_id: branch?.id ?? null, question }) }, auth);
       setAgentRun(run);
       setVisibleEvents(1);
-      navigate("advice");
+      if (mode !== "demo") navigate("advice");
       await loadGovernance(auth).catch(() => undefined);
       push({ tone: run.verification_status === "accept" ? "success" : "error", title: run.verification_status === "accept" ? "Advice verified and released" : "Advice withheld by the verifier", body: `${run.events.length} events persisted · ${run.recommendations.length} recommendations` });
     } catch (caught) {
@@ -412,11 +411,11 @@ export function ProductConsole() {
               <span className="startup-mark"><Icon name={startupError ? "alert" : "refresh"} size={22} className={!startupError ? "spin" : ""} /></span>
               <p className="eyebrow">FINPILOT WORKSPACE</p>
               <h1>{startupError ? "The workspace could not open" : "Preparing your decision cockpit"}</h1>
-              <p className="lede">{startupError || "Loading a private synthetic household and its auditable financial ledger. No login is required."}</p>
+              <p className="lede">{startupError || "Opening an empty, isolated statement workspace. No login or password is required."}</p>
               {startupError ? (
                 <button className="btn btn-primary btn-lg" onClick={() => void startDemo()} disabled={busy !== null}><Icon name="refresh" size={15} />Try again</button>
               ) : <div className="startup-progress"><i /></div>}
-              <small className="fine-print"><Icon name="lock" size={12} />Synthetic data only · isolated workspace · deterministic money math</small>
+              <small className="fine-print"><Icon name="lock" size={12} />No preloaded ledger · isolated workspace · deterministic money math</small>
             </section>
           </main>
         </div>
@@ -442,11 +441,11 @@ export function ProductConsole() {
 
   const commands: Command[] = [
     ...VIEWS.map((item) => ({ id: `view-${item.id}`, label: item.label, group: "Go to", icon: item.icon, run: () => navigate(item.id) })),
-    { id: "sample", label: "Load synthetic sample statement", group: "Actions", icon: "bolt", disabled: working, run: () => void importFile("sample") },
+    { id: "sample", label: "Use fictional demo CSV", group: "Actions", icon: "flask", disabled: working, run: () => void importFile("sample") },
     { id: "analysis", label: "Run deterministic analysis", group: "Actions", icon: "play", disabled: working || !canAnalyse, run: () => { navigate("forecast"); void runAnalysis(); } },
     { id: "advisor", label: "Ask the verified advisor", group: "Actions", icon: "advice", disabled: working || !forecast, run: () => void askAdvisor() },
     { id: "inspector", label: inspectorOpen ? "Hide agent log" : "Show agent log", group: "Actions", icon: "terminal", run: () => setInspectorOpen((open) => !open) },
-    { id: "download", label: "Download sample CSV", group: "Actions", icon: "download", run: () => { const link = document.createElement("a"); link.href = SAMPLE_STATEMENT.path; link.download = SAMPLE_STATEMENT.filename; link.click(); } },
+    { id: "download", label: "Download demo CSV", group: "Actions", icon: "download", run: () => { const link = document.createElement("a"); link.href = SAMPLE_STATEMENT.path; link.download = SAMPLE_STATEMENT.filename; link.click(); } },
     { id: "theme-light", label: "Light appearance", group: "Appearance", icon: "sun", run: () => setThemePreference("light") },
     { id: "theme-dark", label: "Dark appearance", group: "Appearance", icon: "moon", run: () => setThemePreference("dark") },
     { id: "theme-system", label: "Match system appearance", group: "Appearance", icon: "monitor", run: () => setThemePreference("system") },
@@ -484,7 +483,7 @@ export function ProductConsole() {
         </header>
 
         <div className={`view ${working ? "is-busy" : ""}`} key={view}>
-          {mode === "demo" && <LiveDemo insights={insights} rowCount={transactionTotal} completed={completed} snapshot={snapshot} forecast={forecast} scenario={scenario} run={agentRun} busy={working} onRun={() => void runPipeline()} onOpenConsole={() => setMode("console")} onOpenHow={() => setMode("system")} />}
+          {mode === "demo" && <LiveDemo insights={insights} rowCount={transactionTotal} completed={completed} snapshot={snapshot} forecast={forecast} scenario={scenario} run={agentRun} uploadResult={uploadResult} busy={working} onUpload={(file) => void importFile(file)} onLoadSample={() => void importFile("sample")} onRun={() => void runPipeline()} onOpenConsole={() => setMode("console")} onOpenHow={() => setMode("system")} />}
           {mode === "console" && view === "overview" && <Overview insights={insights} transactions={transactions} snapshot={snapshot} hasAccount={accounts.length > 0} busy={working} onNavigate={navigate} onLoadSample={() => void importFile("sample")} onRunAnalysis={() => void runAnalysis()} />}
           {mode === "console" && view === "ledger" && <Ledger transactions={transactions} total={transactionTotal} hasAccount={accounts.length > 0} busy={working} uploadResult={uploadResult} onUpload={(file) => void importFile(file)} onLoadSample={() => void importFile("sample")} onCreateAccount={() => void createAccount()} onCorrect={correctCategory} />}
           {mode === "console" && view === "forecast" && <ForecastView config={config} setConfig={setConfig} snapshot={snapshot} forecast={forecast} scenario={scenario} canRun={canAnalyse} busy={working} onRunAnalysis={() => void runAnalysis()} onAskAdvisor={() => void askAdvisor()} />}
@@ -492,7 +491,7 @@ export function ProductConsole() {
           {mode === "console" && view === "audit" && <AuditView run={agentRun} />}
           {mode === "console" && view === "governance" && <GovernanceView data={governance} busy={working} createDemo={() => void createGovernanceDemo()} rejectReview={(id) => void rejectReview(id)} />}
           {mode === "console" && view === "digests" && <DigestView preference={digestPreference} notifications={notifications} busy={working} savePreference={(enabled) => void saveDigestPreference(enabled)} />}
-          {mode === "system" && <SystemMap agentRun={agentRun} visibleEvents={visibleEvents} setVisibleEvents={setVisibleEvents} />}
+          {mode === "system" && <SystemMap architecture={architecture} agentRun={agentRun} visibleEvents={visibleEvents} setVisibleEvents={setVisibleEvents} />}
         </div>
       </main>
 

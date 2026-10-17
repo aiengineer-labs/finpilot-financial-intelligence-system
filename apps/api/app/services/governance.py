@@ -24,7 +24,7 @@ from app.database.models import (
     RiskRegisterEntry,
     TenantRole,
 )
-from app.graphs.advice import GRAPH_VERSION, PROMPT_VERSION, VERIFIER_VERSION
+from app.graphs.manifest import GRAPH_VERSION, PROMPT_VERSION, VERIFIER_VERSION
 from app.guardrails.service import NEMO_POLICY_VERSION, PII_POLICY_VERSION
 
 GOVERNANCE_BASELINE_VERSION = "governance-baseline-v1"

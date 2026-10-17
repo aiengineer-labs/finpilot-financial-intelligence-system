@@ -57,7 +57,7 @@ async def test_synthetic_workspace_bootstraps_without_credentials(client: AsyncC
     me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me.status_code == 200
     assert me.json()["email"].endswith("@example.invalid")
-    assert me.json()["tenants"][0]["name"] == "Synthetic demo household"
+    assert me.json()["tenants"][0]["name"] == "Private statement workspace"
 
 
 async def test_duplicate_registration_is_a_conflict(client: AsyncClient) -> None:

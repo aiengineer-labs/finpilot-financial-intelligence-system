@@ -21,12 +21,8 @@ from app.database.models import (
     StoredForecastPoint,
     VerificationStatus,
 )
-from app.graphs.advice import (
-    GRAPH_VERSION,
-    PROMPT_VERSION,
-    VERIFIER_VERSION,
-    AdviceWorkflow,
-)
+from app.graphs.advice import AdviceWorkflow
+from app.graphs.manifest import GRAPH_VERSION, PROMPT_VERSION, VERIFIER_VERSION
 from app.guardrails.service import GuardrailViolation, get_model_guardrails
 from app.integrations.mesh import MeshClient
 from app.security.input_policy import InputDecision, assess_untrusted_text

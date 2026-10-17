@@ -8,7 +8,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import TenantContext, tenant_context
-from app.database.models import ClassificationCorrection, ClassificationMethod, Transaction
+from app.database.models import (
+    ClassificationCorrection,
+    ClassificationMethod,
+    Transaction,
+    TransactionUpload,
+)
 from app.database.session import get_session
 from app.schemas.transactions import (
     CategoryCorrectionRequest,
@@ -17,6 +22,7 @@ from app.schemas.transactions import (
     UploadResponse,
 )
 from app.services.csv_ingestion import MAX_UPLOAD_BYTES, CSVColumnMapping
+from app.services.statement_ingestion import StatementValidationError
 from app.services.transaction_import import find_account, import_transactions
 
 router = APIRouter(tags=["transactions"])
@@ -32,6 +38,14 @@ def _upload_response(upload, replayed: bool) -> UploadResponse:  # type: ignore[
         rejected_rows=upload.rejected_rows,
         duplicate_rows=upload.duplicate_rows,
         row_errors=upload.row_errors,
+        source_format=upload.source_format,
+        detected_content_type=upload.detected_content_type,
+        parser_name=upload.parser_name,
+        parser_version=upload.parser_version,
+        extraction_method=upload.extraction_method,
+        page_count=upload.page_count,
+        warnings=upload.warnings,
+        processing_duration_ms=upload.processing_duration_ms,
         replayed=replayed,
     )
 
@@ -46,9 +60,10 @@ async def upload_transactions(
 ) -> UploadResponse:
     if await find_account(session, context.tenant_id, account_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
-    if not file.filename or not file.filename.lower().endswith(".csv"):
+    if not file.filename:
         raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="CSV file required"
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="A .csv or .pdf bank statement is required",
         )
     try:
         mapping = CSVColumnMapping.model_validate(json.loads(mapping_json))
@@ -63,14 +78,37 @@ async def upload_transactions(
             tenant_id=context.tenant_id,
             account_id=account_id,
             filename=file.filename,
+            claimed_content_type=file.content_type,
             content=content,
             mapping=mapping,
         )
+    except StatementValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
     return _upload_response(upload, replayed)
+
+
+@router.get("/transaction-uploads/{upload_id}", response_model=UploadResponse)
+async def get_transaction_upload(
+    upload_id: UUID,
+    context: Annotated[TenantContext, Depends(tenant_context)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> UploadResponse:
+    upload = await session.scalar(
+        select(TransactionUpload).where(
+            TransactionUpload.id == upload_id,
+            TransactionUpload.tenant_id == context.tenant_id,
+        )
+    )
+    if upload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="upload not found")
+    return _upload_response(upload, replayed=False)
 
 
 @router.get("/transactions", response_model=TransactionPage)

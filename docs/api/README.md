@@ -4,7 +4,7 @@ Local OpenAPI is available at `http://localhost:8000/docs`.
 
 - `/health`, `/ready`: liveness and database readiness.
 - `/api/v1/auth/*`: register, login, current memberships.
-- Accounts and transaction routes: source data, uploads, listing, and corrections.
+- Accounts and transaction routes: content-validated CSV/PDF uploads, parser/source provenance, listing, and corrections. Upload failures use stable codes such as `FILE_TYPE_MISMATCH`, `MALFORMED_PDF`, `PDF_ENCRYPTED`, and `PDF_OCR_REQUIRED`.
 - `/api/v1/analytics/*`: immutable snapshots, forecasts, and scenarios.
 - `/api/v1/agent-runs`: bounded Mesh workflow and persisted audit retrieval.
 - `/api/v1/governance/*`: assets, risks, evaluations, reviews, and decisions.
@@ -12,4 +12,8 @@ Local OpenAPI is available at `http://localhost:8000/docs`.
 - `GET /api/v1/digests/dispatch`: Vercel Cron route authenticated with `CRON_SECRET`.
 
 Tenant routes require a JWT and `X-Tenant-ID`; database membership is authoritative. Object queries include the resolved tenant predicate and return 404 for cross-tenant IDs. Responses carry `X-Request-ID`.
+
+`POST /api/v1/accounts/{account_id}/transaction-uploads` accepts one `.csv` or `.pdf` file plus the existing explicit mapping. The server reads at most 5 MiB, detects the actual format, requires extension/MIME consistency, validates PDF structure and resource budgets, and then dispatches to a format adapter. PDF support accepts at most 25 pages and only embedded-text transaction tables; encrypted, active-content, attachment-bearing, malformed, scanned, or structurally excessive PDFs fail closed. Successful responses include detected content type, parser/version, extraction method, page count, duration, and warnings.
+
+`GET /api/v1/transaction-uploads/{upload_id}` returns the same parser provenance for an authorized tenant and returns 404 across tenant boundaries. Transaction responses include the source CSV row or extracted PDF page/text-line locator.
 

@@ -6,12 +6,15 @@ export type Transaction = {
   id: string; transaction_date: string; amount_minor: number; balance_minor: number | null;
   currency: string; merchant_normalized: string; description: string; kind: string;
   category: string; classification_method: string; classification_confidence_bps: number;
-  is_excluded_from_cashflow: boolean;
+  is_excluded_from_cashflow: boolean; source_evidence: Record<string, string | number>;
 };
 export type UploadResult = {
   id: string; filename: string; status: string; total_rows: number; accepted_rows: number;
   rejected_rows: number; duplicate_rows: number; replayed: boolean;
   row_errors: Array<Record<string, string | number>>;
+  source_format: "csv" | "pdf"; detected_content_type: string; parser_name: string;
+  parser_version: string; extraction_method: string; page_count: number | null; warnings: string[];
+  processing_duration_ms: number;
 };
 export type Pattern = {
   id: string; merchant: string; cadence: string; typical_amount_minor: number;
@@ -75,4 +78,17 @@ export type DigestPreference = {
 export type Notification = {
   id: string; digest_job_id: string; status: string; subject: string; body: string;
   delivered_at: string | null; created_at: string;
+};
+export type ArchitectureNode = {
+  id: string; label: string; detail: string; runtime: string;
+  kind: "input" | "guardrail" | "deterministic" | "store" | "mesh" | "verifier" | "output";
+  x: number; y: number;
+};
+export type ArchitectureEdge = {
+  source: string; target: string; label: string;
+  branch: "normal" | "revise" | "reject" | "audit" | "mesh";
+};
+export type ArchitectureManifest = {
+  graph_version: string; prompt_version: string; verifier_version: string; mesh_model: string | null;
+  nodes: ArchitectureNode[]; edges: ArchitectureEdge[];
 };

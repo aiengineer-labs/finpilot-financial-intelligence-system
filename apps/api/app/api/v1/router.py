@@ -7,6 +7,7 @@ from app.api.v1 import (
     auth,
     digests,
     governance,
+    system,
     transactions,
     workspace,
 )
@@ -20,3 +21,4 @@ api_router.include_router(analytics.router)
 api_router.include_router(agents.router)
 api_router.include_router(governance.router)
 api_router.include_router(digests.router)
+api_router.include_router(system.router)
