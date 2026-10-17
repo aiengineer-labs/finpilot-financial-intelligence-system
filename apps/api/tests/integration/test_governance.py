@@ -53,7 +53,7 @@ async def test_governance_registry_release_gate_and_tenant_isolation(
 
     summary = await client.get("/api/v1/governance/summary", headers=owner_headers)
     assert summary.status_code == 200, summary.text
-    assert summary.json()["artifacts"] == 10
+    assert summary.json()["artifacts"] == 11
     assert summary.json()["risks"] == 13
     assert summary.json()["evaluation_failures"] == 1
     assert summary.json()["release_ready"] is False

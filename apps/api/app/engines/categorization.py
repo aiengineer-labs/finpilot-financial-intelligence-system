@@ -71,6 +71,22 @@ _CATEGORY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
 )
+# Categories the Mesh categorizer may choose for rows the rules could not place. Transfers and
+# refunds are decided by code only, and the fallback category means "still unclear".
+EXPENSE_FALLBACK = "uncategorized"
+INCOME_FALLBACK = "other_income"
+SEMANTIC_EXPENSE_CATEGORIES: tuple[str, ...] = (
+    *(category for category, _ in _CATEGORY_RULES if category != "salary"),
+    "insurance",
+    "fitness",
+    EXPENSE_FALLBACK,
+)
+SEMANTIC_INCOME_CATEGORIES: tuple[str, ...] = ("salary", INCOME_FALLBACK)
+# Matches the governance threshold policy (review-policy-v1 low_confidence_bps).
+MIN_SEMANTIC_CONFIDENCE_BPS = 7_000
+# A model label ranks below a keyword rule (9000) and a human correction (10000).
+SEMANTIC_CONFIDENCE_CAP_BPS = 8_500
+
 _CATEGORY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (
         category,

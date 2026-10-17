@@ -20,7 +20,11 @@ The browser and every submitted value are untrusted. Authentication establishes 
 - **CSRF (medium):** current APIs use explicit bearer headers and no credentialed CORS. A future cookie session design must add SameSite and CSRF controls.
 - **SSRF/tool abuse (critical):** agents receive no generic network, filesystem, shell, SQL, transfer, trade, or purchase tool. Mesh is the sole model network destination.
 - **Denial of service/cost exhaustion (high):** request/model size and timeout bounds begin in Phase 1; rate limiting, upload limits, execution budgets, and durable cost telemetry must land before public exposure.
-- **Secret or PII leakage (critical):** secrets remain server-side and are excluded from logs/source; transaction data is not yet sent to Mesh. Presidio minimization and structured log redaction are Phase 6 gates.
+- **Secret or PII leakage (critical):** secrets remain server-side and are excluded from logs and source. Two paths send transaction-derived data to Mesh:
+  - an agent run, which sends minimized calculation context with bounded merchant labels
+  - semantic categorization, which sends bounded, screened labels without amounts, balances or dates
+
+  Presidio minimizes both paths. It uses pattern-only recognizers and misses some names and addresses. Structured log redaction is still a gate.
 - **Dependency/supply-chain compromise (high):** lockfiles, CI lint/test/build, least-privilege workflow permissions, and later dependency/container/secret scanners. The organizer workflow must be downloaded and inspected before enabling.
 
 ## Residual risk and release blockers

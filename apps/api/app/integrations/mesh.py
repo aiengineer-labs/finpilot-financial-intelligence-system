@@ -30,6 +30,35 @@ class MeshResult:
     guardrails: dict[str, str] | None = None
 
 
+def _count(values: Any, key: str) -> int | None:
+    value = values.get(key) if isinstance(values, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def token_usage(result: MeshResult) -> tuple[int, int]:
+    """Prompt and completion tokens as Mesh reports them; missing counts are zero."""
+
+    usage = result.completion.usage or {}
+    return _count(usage, "prompt_tokens") or 0, _count(usage, "completion_tokens") or 0
+
+
+def reported_billing(result: MeshResult) -> dict[str, Any]:
+    """Cost facts exactly as Mesh reports them; absent fields are omitted, never estimated."""
+
+    usage = result.completion.usage or {}
+    billing: dict[str, Any] = {}
+    cost = usage.get("cost_usd")
+    if isinstance(cost, int | float | str) and not isinstance(cost, bool):
+        billing["cost_usd"] = str(cost)
+    cached = _count(usage.get("prompt_tokens_details"), "cached_tokens")
+    if cached is not None:
+        billing["cached_input_tokens"] = cached
+    reasoning = _count(usage.get("completion_tokens_details"), "reasoning_tokens")
+    if reasoning is not None:
+        billing["reasoning_tokens"] = reasoning
+    return billing
+
+
 class MeshProviderError(RuntimeError):
     """Mesh refused or could not serve a request; the reason is fixed text, never upstream data."""
 

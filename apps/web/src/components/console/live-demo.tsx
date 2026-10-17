@@ -11,7 +11,7 @@ import { RhythmPanel, SpendMixPanel, spendingRhythm } from "./overview";
 import { STAGES, type StageId } from "./shared";
 
 /** What the console is doing right now, as far as this screen cares. */
-export type Activity = "upload" | "analysis" | "advisor" | null;
+export type Activity = "upload" | "categorize" | "analysis" | "advisor" | null;
 
 type Props = {
   insights: Insights;
@@ -33,10 +33,11 @@ type Props = {
   onOpenHow: () => void;
 };
 
-/* Each stage says plainly whether a model is involved; only categorize and advise call Mesh. */
+/* Each stage says plainly whether a model is involved; only categorize and advise call Mesh.
+   Categorize is rules first: Mesh sees only the labels the rules could not place. */
 const AGENTS: Record<StageId, { icon: IconName; role: string; ai: boolean }> = {
   import: { icon: "upload", role: "Validates every row", ai: false },
-  categorize: { icon: "filter", role: "Labels each payment", ai: true },
+  categorize: { icon: "filter", role: "Rules, then Mesh for unclear rows", ai: true },
   analyze: { icon: "sparkline", role: "Finds patterns", ai: false },
   forecast: { icon: "forecast", role: "Looks 30 days ahead", ai: false },
   advise: { icon: "advice", role: "Drafts next moves", ai: true },
@@ -171,7 +172,7 @@ function Briefing({ insights, rowCount, snapshot, forecast, scenario, run, uploa
   const accepted = run?.verification_status === "accept";
   const status = run ? (accepted ? "Verified" : "Withheld") : forecast ? "Forecast ready" : snapshot?.analysis_mode === "spending" ? "Spending analysed" : "Ready to run";
   const period = insights.firstDay && insights.lastDay ? `${shortDate(insights.firstDay)} – ${longDate(insights.lastDay)}` : null;
-  const running = activity === "analysis" || activity === "advisor";
+  const running = activity === "categorize" || activity === "analysis" || activity === "advisor";
 
   return (
     <section className="glass briefing">
@@ -251,7 +252,9 @@ function Thinking({ activity, completed }: { activity: Activity; completed: Set<
   const next = STAGES.find(([id]) => !completed.has(id));
   const line = activity === "advisor"
     ? "The advisor is drafting options while the verifier checks every amount against your ledger…"
-    : "Finding recurring payments, unusual charges and what the coming weeks look like…";
+    : activity === "categorize"
+      ? "Asking Mesh to label the payments the rules could not place. Only the labels are sent, never amounts or balances…"
+      : "Finding recurring payments, unusual charges and what the coming weeks look like…";
   return (
     <section className="glass answer thinking" aria-live="polite" aria-busy="true">
       <header className="ai-byline">
@@ -341,7 +344,7 @@ export function LiveDemo(props: Props) {
 
   if (!rowCount) return <div className="copilot"><Landing busy={busy} onUpload={props.onUpload} onLoadSample={props.onLoadSample} onOpenHow={props.onOpenHow} /></div>;
 
-  const running = activity === "analysis" || activity === "advisor";
+  const running = activity === "categorize" || activity === "analysis" || activity === "advisor";
   return (
     <div className="copilot">
       <Briefing {...props} />

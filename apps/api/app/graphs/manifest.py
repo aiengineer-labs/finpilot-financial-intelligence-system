@@ -55,6 +55,15 @@ SYSTEM_GRAPH_NODES: Final[tuple[GraphNode, ...]] = (
         "y": 105,
     },
     {
+        "id": "semantic_categorizer",
+        "label": "Categorizer",
+        "detail": "Labels rows the rules missed; code applies only confident, fixed categories.",
+        "runtime": "Mesh API",
+        "kind": "mesh",
+        "x": 285,
+        "y": 300,
+    },
+    {
         "id": "ledger",
         "label": "Ledger truth",
         "detail": "Tenant-isolated transactions and immutable import lineage.",
@@ -164,6 +173,24 @@ SYSTEM_GRAPH_EDGES: Final[tuple[GraphEdge, ...]] = (
         "branch": "normal",
     },
     {"source": "ingestion", "target": "ledger", "label": "normalized", "branch": "normal"},
+    {
+        "source": "ingestion",
+        "target": "semantic_categorizer",
+        "label": "unclear labels",
+        "branch": "normal",
+    },
+    {
+        "source": "semantic_categorizer",
+        "target": "ledger",
+        "label": "confident categories",
+        "branch": "normal",
+    },
+    {
+        "source": "mesh_gateway",
+        "target": "semantic_categorizer",
+        "label": "model",
+        "branch": "mesh",
+    },
     {
         "source": "ledger",
         "target": "financial_engines",
