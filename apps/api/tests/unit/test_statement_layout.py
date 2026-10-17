@@ -145,3 +145,49 @@ def test_money_parser_accepts_currency_marks_and_suffixes() -> None:
     assert [row.balance_minor for row in result.rows] == [1_000_000, -900_000, None]
     assert result.rows[2].transaction_date.isoformat() == "2026-01-03T00:00:00"
     assert [error.row for error in result.errors] == [5]
+
+
+@pytest.mark.parametrize(
+    ("header", "first_row", "second_row"),
+    [
+        (
+            "S No.,Value Date,Transaction Date,Cheque Number,Transaction Remarks,"
+            "Withdrawal Amount (INR ),Deposit Amount (INR ),Balance (INR )",
+            '1,01/08/2026,01/08/2026,-,UPI/Grocer/okicici,170.00,0.00,"66,709.16"',
+            '2,02/08/2026,02/08/2026,-,NEFT-SALARY ACME,0.00,"25,000.00","91,709.16"',
+        ),
+        (
+            "Txn Date,Value Date,Description,Ref No./Cheque No.,Debit,Credit,Balance",
+            '1 Aug 2026,1 Aug 2026,TO TRANSFER-UPI/Grocer,TRANSFER TO 0001, 170.00,,"66,709.16"',
+            '2 Aug 2026,2 Aug 2026,BY TRANSFER-NEFT SALARY ACME,0002,," 25,000.00","91,709.16"',
+        ),
+        (
+            "Tran Date,CHQNO,PARTICULARS,DR,CR,BAL,SOL",
+            "01-08-2026,,UPI/P2M/Grocer,170.00,,66709.16,0001",
+            "02-08-2026,,NEFT/SALARY ACME,,25000.00,91709.16,0001",
+        ),
+        (
+            "Sl. No.,Transaction Date,Value Date,Description,Chq / Ref No.,Amount,Dr / Cr,"
+            "Balance,Dr / Cr",
+            "1,01-08-2026,01-08-2026,UPI/Grocer,UPI-0001,170.00,DR,66709.16,CR",
+            "2,02-08-2026,02-08-2026,NEFT SALARY ACME,NEFT-0002,25000.00,CR,91709.16,CR",
+        ),
+    ],
+    ids=["icici", "sbi", "axis", "kotak"],
+)
+def test_common_bank_csv_exports_are_recognized(
+    header: str, first_row: str, second_row: str
+) -> None:
+    preamble = "Account statement\nAccount Number,XXXXXXXX0001\n\n"
+    content = f"{preamble}{header}\n{first_row}\n{second_row}\n"
+    result = _parse(content.encode())
+
+    assert result.statement_kind is StatementKind.DEPOSIT
+    rows = result.transactions.rows
+    assert [row.amount_minor for row in rows] == [-17_000, 2_500_000]
+    assert [row.balance_minor for row in rows] == [6_670_916, 9_170_916]
+    assert [row.transaction_date.date().isoformat() for row in rows] == [
+        "2026-08-01",
+        "2026-08-02",
+    ]
+    assert not result.transactions.errors

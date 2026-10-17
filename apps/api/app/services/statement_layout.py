@@ -136,7 +136,7 @@ def infer_date_format(values: list[str]) -> tuple[str, bool] | None:
 
 
 def has_card_markers(text: str) -> bool:
-    normalized = text.casefold()
+    normalized = re.sub(r"\s+", " ", text).casefold()
     return any(marker in normalized for marker in _CARD_MARKERS)
 
 

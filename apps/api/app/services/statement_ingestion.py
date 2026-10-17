@@ -40,7 +40,7 @@ PDF_PARSER_NAME = "pypdf-text-table"
 PDF_PARSER_VERSION = "2"
 CSV_PARSER_NAME = "python-csv"
 CSV_PARSER_VERSION = "2"
-MAX_CONTINUATION_LINES = 4
+MAX_CONTINUATION_LINES = 6
 
 _PDF_HEADER = b"%PDF-"
 _ACTIVE_PDF_KEYS = {
@@ -264,19 +264,15 @@ def _normalized_fragment(text: str) -> str:
 
 
 def _statement_kind(page_texts: list[str], transactions: ParseResult) -> StatementKind:
-    normalized = " ".join(page_texts).casefold()
-    credit_card_markers = (
-        "credit card",
-        "credit limit",
-        "minimum payment due",
-        "total payment due",
-    )
-    if "credit card" in normalized and any(
-        marker in normalized for marker in credit_card_markers[1:]
-    ):
-        return StatementKind.CREDIT_CARD
+    # Per-row running balances only appear on bank accounts, so they outrank card wording,
+    # which savings statements can also contain in offers and footers.
     if any(row.balance_minor is not None for row in transactions.rows):
         return StatementKind.DEPOSIT
+    # Layout extraction pads words with spaces; collapse them before matching phrases.
+    normalized = re.sub(r"\s+", " ", " ".join(page_texts)).casefold()
+    card_terms = ("credit limit", "minimum payment due", "total payment due", "minimum amount due")
+    if "credit card" in normalized and any(term in normalized for term in card_terms):
+        return StatementKind.CREDIT_CARD
     return StatementKind.UNKNOWN
 
 
@@ -643,6 +639,110 @@ def _movement(line: _PdfLine, card_statement: bool) -> tuple[str, int] | None:
     return None
 
 
+def _row_anchors(classified: list[_PdfLine]) -> dict[int, str]:
+    """Return the lines that carry one transaction's date and movement amount."""
+
+    is_movement = [any(role in line.amounts for role in _MOVEMENT_ROLES) for line in classified]
+    anchors: dict[int, str] = {}
+    for position, line in enumerate(classified):
+        if not is_movement[position]:
+            continue
+        # A date split over lines ("08 Jun" / "'25") may borrow from a text-only neighbour.
+        above = (
+            classified[position - 1].date_parts
+            if position > 0 and not is_movement[position - 1]
+            else []
+        )
+        below = (
+            classified[position + 1].date_parts
+            if position + 1 < len(classified) and not is_movement[position + 1]
+            else []
+        )
+        for parts in (
+            line.date_parts,
+            line.date_parts + below,
+            above + line.date_parts,
+            above + line.date_parts + below,
+        ):
+            raw_date = " ".join(parts)
+            if parts and _pdf_date(raw_date, day_first=True) is not None:
+                anchors[position] = raw_date
+                break
+    return anchors
+
+
+def _rows_are_centered(table_pages: list[tuple[list[_PdfLine], dict[int, str], bool]]) -> bool:
+    """Decide whether rows put their date/amounts mid-row with text above and below.
+
+    Top-aligned tables print the first narration line beside the date, and nothing sits
+    between the header and the first row. Vertically centered tables (common in
+    HTML-rendered statements) show text above the first row, or dates between text lines.
+    """
+
+    anchor_lines = [
+        classified[position] for classified, anchors, _ in table_pages for position in anchors
+    ]
+    if not anchor_lines:
+        return False
+    bare = sum(1 for line in anchor_lines if not line.details)
+    if bare * 4 >= len(anchor_lines):
+        return True
+    for classified, anchors, header_on_page in table_pages:
+        if not header_on_page:
+            continue
+        first_position = min(anchors)
+        first = classified[first_position]
+        if any(
+            line.details and not line.amounts and abs(line.y - first.y) <= first.font_size * 2.2
+            for line in classified[:first_position]
+        ):
+            return True
+    return False
+
+
+def _attach_wrapped_text(
+    classified: list[_PdfLine], positions: list[int], *, centered: bool
+) -> None:
+    """Join each row's wrapped text lines to its anchor, in reading order."""
+
+    candidates: dict[int, list[int]] = {}
+    for position, line in enumerate(classified):
+        if position in positions or line.amounts or not line.details:
+            continue
+        if centered:
+            target = min(positions, key=lambda anchor: abs(classified[anchor].y - line.y))
+        else:
+            earlier = [anchor for anchor in positions if anchor < position]
+            if not earlier:
+                continue
+            target = earlier[-1]
+        candidates.setdefault(target, []).append(position)
+
+    def contiguous(anchor: _PdfLine, order: list[int]) -> list[int]:
+        # Walk outward from the anchor; a large vertical gap ends the row.
+        kept: list[int] = []
+        reference = anchor.y
+        for position in order:
+            line = classified[position]
+            too_far = abs(line.y - reference) > line.font_size * 2.4
+            if too_far or len(kept) >= MAX_CONTINUATION_LINES:
+                break
+            kept.append(position)
+            reference = line.y
+        return kept
+
+    for target in positions:
+        anchor = classified[target]
+        own = candidates.get(target, [])
+        above = contiguous(anchor, sorted((p for p in own if p < target), reverse=True))[::-1]
+        below = contiguous(anchor, sorted(p for p in own if p > target))
+        anchor.details = [
+            *(text for position in above for text in classified[position].details),
+            *anchor.details,
+            *(text for position in below for text in classified[position].details),
+        ]
+
+
 def _columnar_pdf_table_as_csv(
     pages: list[list[_PositionedText]], page_texts: list[str], mapping: CSVColumnMapping
 ) -> tuple[bytes, list[dict[str, int | str]]]:
@@ -654,88 +754,38 @@ def _columnar_pdf_table_as_csv(
 
     card_statement = has_card_markers(" ".join(page_texts))
     columns: dict[str, _PdfColumn] | None = None
-    centered: bool | None = None
-    anchors: list[tuple[_PdfLine, str]] = []
+    # (lines below the table header, anchor position -> raw date, header is on this page)
+    table_pages: list[tuple[list[_PdfLine], dict[int, str], bool]] = []
     for page_fragments in pages:
         lines = _pdf_lines(page_fragments)
         start = 0
+        header_on_page = False
         for index in range(len(lines)):
             found = _header_columns(lines, index)
             if found is not None:
                 columns, consumed = found
                 start = index + consumed
+                header_on_page = True
                 break
         if columns is None:
             continue
         classified = [_classify_pdf_line(line, columns) for line in lines[start:]]
-        is_movement = [
-            any(role in line.amounts for role in _MOVEMENT_ROLES) for line in classified
-        ]
-        page_anchors: dict[int, str] = {}
-        for position, line in enumerate(classified):
-            if not is_movement[position]:
-                continue
-            # A date split over lines ("08 Jun" / "'25") may borrow from a text-only neighbour.
-            above = (
-                classified[position - 1].date_parts
-                if position > 0 and not is_movement[position - 1]
-                else []
-            )
-            below = (
-                classified[position + 1].date_parts
-                if position + 1 < len(classified) and not is_movement[position + 1]
-                else []
-            )
-            candidates = [
-                line.date_parts,
-                line.date_parts + below,
-                above + line.date_parts,
-                above + line.date_parts + below,
-            ]
-            for parts in candidates:
-                raw_date = " ".join(parts)
-                if parts and _pdf_date(raw_date, day_first=True) is not None:
-                    page_anchors[position] = raw_date
-                    break
-        if not page_anchors:
-            continue
-        positions = sorted(page_anchors)
-        if centered is None:
-            # Vertically centered rows put wrapped text above the amount line as well.
-            first = classified[positions[0]]
-            centered = any(
-                line.details and not line.amounts
-                for line in classified[: positions[0]]
-                if abs(line.y - first.y) <= first.font_size * 2.2
-            )
-        attached: dict[int, int] = {}
-        for position, line in enumerate(classified):
-            if position in page_anchors or line.amounts or not line.details:
-                continue
-            if centered:
-                target = min(positions, key=lambda anchor: abs(classified[anchor].y - line.y))
-            else:
-                earlier = [anchor for anchor in positions if anchor < position]
-                if not earlier:
-                    continue
-                target = earlier[-1]
-            count = attached.get(target, 0)
-            distance = abs(classified[target].y - line.y)
-            if count >= MAX_CONTINUATION_LINES or distance > line.font_size * 2.4 * (count + 1):
-                continue
-            attached[target] = count + 1
-            anchor_line = classified[target]
-            if position < target:
-                anchor_line.details[:0] = line.details
-            else:
-                anchor_line.details.extend(line.details)
-        anchors.extend((classified[position], page_anchors[position]) for position in positions)
+        page_anchors = _row_anchors(classified)
+        if page_anchors:
+            table_pages.append((classified, page_anchors, header_on_page))
 
     if columns is None:
         raise StatementValidationError(
             "PDF_TABLE_NOT_FOUND",
             "No supported transaction table was found. The PDF needs recognizable date, "
             "description, and amount or withdrawal/deposit columns",
+        )
+    centered = _rows_are_centered(table_pages)
+    anchors: list[tuple[_PdfLine, str]] = []
+    for classified, page_anchors, _ in table_pages:
+        _attach_wrapped_text(classified, sorted(page_anchors), centered=centered)
+        anchors.extend(
+            (classified[position], page_anchors[position]) for position in sorted(page_anchors)
         )
     day_first = numeric_date_order([raw_date for _, raw_date in anchors])
     fieldnames = [mapping.date, mapping.merchant]
@@ -940,10 +990,10 @@ def parse_statement(
             source_rows = [table.source_rows[row.source_row - 2] for row in transactions.rows]
     except ValueError as exc:
         raise StatementValidationError("INVALID_CSV", str(exc)) from exc
-    if card_statement:
-        statement_kind = StatementKind.CREDIT_CARD
-    elif any(row.balance_minor is not None for row in transactions.rows):
+    if any(row.balance_minor is not None for row in transactions.rows):
         statement_kind = StatementKind.DEPOSIT
+    elif card_statement:
+        statement_kind = StatementKind.CREDIT_CARD
     else:
         statement_kind = StatementKind.UNKNOWN
     return ParsedStatement(

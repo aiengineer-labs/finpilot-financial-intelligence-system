@@ -273,6 +273,101 @@ def test_continuation_page_without_header_keeps_dates_and_distinct_rows(flipped:
     ]
 
 
+def _centered_row(
+    top: float,
+    date: str,
+    lines: list[str],
+    *,
+    deposit: str | None = None,
+    withdrawal: str | None = None,
+    balance: str | None = None,
+) -> list[tuple[float, float, str]]:
+    """A bank row whose date and amounts sit at the vertical middle of its particulars."""
+    middle = top - 11 * (len(lines) - 1) / 2
+    items = [(20.0, middle, date)]
+    items += [(140.0, top - 11 * index, text) for index, text in enumerate(lines)]
+    for x, value in ((424.0, deposit), (500.0, withdrawal), (604.0, balance)):
+        if value:
+            items.append((x, middle, value))
+    return items
+
+
+@pytest.mark.parametrize("flipped", [False, True])
+@pytest.mark.parametrize("single_line_first", [False, True])
+def test_savings_pdf_with_vertically_centered_rows(flipped: bool, single_line_first: bool) -> None:
+    # Layout of a real savings statement: DATE | MODE | PARTICULARS | DEPOSITS |
+    # WITHDRAWALS | BALANCE, a B/F opening row, and date/amounts centred in each row.
+    payee = ["Synthetic Payee One", "UPI/payee/bharatpe/Pay to", "Bha/YesBank_Ye/0001", "67d1a8"]
+    salary = ["SALARY ACME PAYROLL"]
+    first, second = (salary, payee) if single_line_first else (payee, salary)
+    amounts = {
+        "payee": {"withdrawal": "170.00"},
+        "salary": {"deposit": "25,000.00"},
+    }
+    first_kind, second_kind = ("salary", "payee") if single_line_first else ("payee", "salary")
+    first_balance, second_balance = (
+        ("91,879.16", "91,709.16") if single_line_first else ("66,709.16", "91,709.16")
+    )
+    page_one = [
+        (20, 740, "Explore our Rewards Credit Card with a higher credit limit"),
+        (20, 720, "ACCOUNT TYPE"),
+        (330, 720, "ACCOUNT BALANCE (I)"),
+        (20, 708, "Savings A/c XXXXXXXX0001"),
+        (330, 708, "1,10,000.00"),
+        (20, 650, "DATE"),
+        (70, 650, "MODE"),
+        (140, 650, "PARTICULARS"),
+        (420, 650, "DEPOSITS"),
+        (490, 650, "WITHDRAWALS"),
+        (604, 650, "BALANCE"),
+        *_centered_row(632, "01-08-2026", ["B/F"], balance="66,879.16"),
+        *_centered_row(612, "01-08-2026", first, balance=first_balance, **amounts[first_kind]),
+        *_centered_row(560, "02-08-2026", second, balance=second_balance, **amounts[second_kind]),
+        *_centered_row(
+            510,
+            "13-08-2026",
+            ["CAMPUS CANTEEN 13", "UPI/CANTEEN/q2125@ybl/UPI", "L/657983598852/"],
+            withdrawal="140.00",
+            balance="91,569.16",
+        ),
+    ]
+    page_two = [
+        *_centered_row(
+            760,
+            "31-08-2026",
+            ["BOB FINANCIAL SOLUTIONS LIMITED", "UPI/BOB FINANC/amzn-detpls8s2/UPI/Amazon"],
+            withdrawal="1,575.00",
+            balance="89,994.16",
+        ),
+        (20, 700, "Total"),
+        (424, 700, "25,000.00"),
+        (500, 700, "1,885.00"),
+        (20, 660, "Page 2 of 2"),
+    ]
+    result = parse_statement(
+        positioned_pages_pdf([page_one, page_two], flipped=flipped),
+        filename="savings.pdf",
+        claimed_content_type="application/pdf",
+        mapping=_mapping(),
+    )
+
+    assert result.extraction_method == "embedded_column_table"
+    # Card offers in the margin do not outweigh the running balance column.
+    assert result.statement_kind is StatementKind.DEPOSIT
+    rows = result.transactions.rows
+    by_amount = {row.amount_minor: row for row in rows}
+    assert sorted(by_amount) == [-157_500, -17_000, -14_000, 2_500_000]
+    assert by_amount[-17_000].description == (
+        "Synthetic Payee One UPI/payee/bharatpe/Pay to Bha/YesBank_Ye/0001 67d1a8"
+    )
+    assert by_amount[-14_000].description == (
+        "CAMPUS CANTEEN 13 UPI/CANTEEN/q2125@ybl/UPI L/657983598852/"
+    )
+    assert by_amount[-14_000].transaction_date.date().isoformat() == "2026-08-13"
+    assert by_amount[-157_500].balance_minor == 8_999_416
+    assert by_amount[2_500_000].description == "SALARY ACME PAYROLL"
+
+
 def test_card_statement_markers_classify_the_statement_kind() -> None:
     content = positioned_statement_pdf(
         (40, 770, "Synthetic Rewards Credit Card Monthly Statement"),
