@@ -2,8 +2,8 @@
 
 from typing import Final, Literal, TypedDict
 
-GRAPH_VERSION: Final = "advice-graph-v1"
-PROMPT_VERSION: Final = "advice-prompts-v1"
+GRAPH_VERSION: Final = "advice-graph-v2"
+PROMPT_VERSION: Final = "advice-prompts-v2"
 VERIFIER_VERSION: Final = "financial-verifier-v1"
 
 NodeKind = Literal["input", "guardrail", "deterministic", "store", "mesh", "verifier", "output"]
@@ -75,7 +75,7 @@ SYSTEM_GRAPH_NODES: Final[tuple[GraphNode, ...]] = (
     {
         "id": "supervisor",
         "label": "Supervisor",
-        "detail": "Routes the grounded forecast or scenario request under a bounded budget.",
+        "detail": "Routes spending, forecast, or scenario advice under a bounded budget.",
         "runtime": "LangGraph",
         "kind": "deterministic",
         "x": 1065,

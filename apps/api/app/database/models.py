@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
@@ -269,6 +270,8 @@ class CalculationSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     input_sha256: Mapped[str] = mapped_column(String(64))
     engine_version: Mapped[str] = mapped_column(String(40))
     anomaly_results: Mapped[list[dict[str, str | int]]] = mapped_column(JSON, default=list)
+    # Deterministic spending summary, frozen with the snapshot for audit.
+    spending_summary: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
 
 class StoredRecurringPattern(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -360,7 +363,10 @@ class AgentExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     snapshot_id: Mapped[UUID] = mapped_column(
         ForeignKey("calculation_snapshots.id", ondelete="RESTRICT")
     )
-    forecast_id: Mapped[UUID] = mapped_column(ForeignKey("forecasts.id", ondelete="RESTRICT"))
+    # Null for spending advice grounded only in a snapshot (card or balance-free statements).
+    forecast_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("forecasts.id", ondelete="RESTRICT"), nullable=True
+    )
     scenario_run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("scenario_runs.id", ondelete="RESTRICT"), nullable=True
     )

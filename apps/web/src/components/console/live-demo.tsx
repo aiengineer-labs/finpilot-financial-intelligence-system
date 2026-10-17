@@ -84,7 +84,9 @@ export function LiveDemo({ insights, rowCount, completed, snapshot, forecast, sc
           <div className="demo-summary-grid">
             <span><small>Ledger</small><b>{rowCount ? `${rowCount} rows` : "Empty"}</b></span>
             <span><small>Savings</small><b>{rowCount ? `${insights.rate}%` : "—"}</b></span>
-            <span><small>30-day low</small><b>{forecast ? compactMoney(scenario?.minimum_balance_minor ?? forecast.minimum_balance_minor) : spendingOnly ? "Needs balance" : "Pending"}</b></span>
+            {forecast || !spendingOnly
+              ? <span><small>30-day low</small><b>{forecast ? compactMoney(scenario?.minimum_balance_minor ?? forecast.minimum_balance_minor) : "Pending"}</b></span>
+              : <span><small>30-day spend</small><b>{snapshot?.spending ? compactMoney(snapshot.spending.projected_30_day_spend_minor) : "Pending"}</b></span>}
             <span><small>Verdict</small><b>{status}</b></span>
           </div>
           {uploadResult && <div className="demo-import-result"><Icon name="check" size={14} /><span><b>{uploadResult.filename}</b><small>{uploadResult.source_format.toUpperCase()} verified · {uploadResult.accepted_rows} accepted · {uploadResult.duplicate_rows} duplicate · {uploadResult.rejected_rows} rejected</small></span></div>}
@@ -117,6 +119,25 @@ export function LiveDemo({ insights, rowCount, completed, snapshot, forecast, sc
         <div><p className="eyebrow">CURRENT EVIDENCE</p><h3>{snapshot ? "The decision record is versioned" : rowCount ? "The ledger is ready for analysis" : "No financial evidence loaded"}</h3><p>{snapshot ? `${snapshot.source_transaction_count} rows · ${snapshot.recurring_patterns.length} recurring patterns · ${snapshot.anomaly_results.length} anomalies` : rowCount ? `${rowCount} validated rows are stored. No model performs financial arithmetic.` : "Upload a CSV or PDF, or explicitly load the fictional demo file to begin."}</p></div>
         <div className="button-row"><button className="btn btn-glass" onClick={onOpenConsole}><Icon name="overview" size={15} />Open full console</button>{run && <Pill tone={run.verification_status === "accept" ? "good" : "bad"} icon="governance">{run.verification_status}</Pill>}</div>
       </Panel>
+
+      {run && (
+        <Panel className="demo-advice">
+          <div className="demo-advice-head">
+            <div><p className="eyebrow">VERIFIED ADVICE</p><h3>{run.verification_status === "accept" ? (spendingOnly ? "Where to cut your spending" : "How to spend less and save more") : "Advice withheld by the verifier"}</h3></div>
+            <Pill tone={run.verification_status === "accept" ? "good" : "bad"} icon="governance">{run.verification_status === "accept" ? "Every amount verified" : run.verification_status}</Pill>
+          </div>
+          {run.verification_status === "accept" ? (
+            <ol className="demo-advice-list">
+              {run.recommendations.map((item) => (
+                <li key={item.id}>
+                  <div><b>{item.title}</b><p>{item.explanation}</p></div>
+                  {item.amount_minor !== null && <strong className="positive">{money(Math.abs(item.amount_minor))}</strong>}
+                </li>
+              ))}
+            </ol>
+          ) : <p className="muted">{run.final_response}</p>}
+        </Panel>
+      )}
     </div>
   );
 }

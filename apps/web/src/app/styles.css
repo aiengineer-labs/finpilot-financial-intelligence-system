@@ -760,6 +760,13 @@ input[type="date"] { min-height: 38px; }
 .callout.bad > svg { flex: none; margin-top: 2px; color: var(--red); }
 .callout.info { background: var(--accent-soft); }
 .callout.info > svg { flex: none; margin-top: 2px; color: var(--accent); }
+.demo-advice { display: grid; gap: 14px; }
+.demo-advice-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.demo-advice-head h3 { margin: 4px 0 0; }
+.demo-advice-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; counter-reset: advice; }
+.demo-advice-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 12px 14px; border-radius: 14px; background: var(--glass-thin); border: 1px solid var(--hairline); }
+.demo-advice-list li p { margin: 4px 0 0; color: var(--ink-2); font-size: 13.5px; line-height: 1.45; }
+.demo-advice-list li strong { flex: none; font-size: 15px; }
 .callout-panel { padding: 12px; }
 .assumptions { gap: 10px; }
 .assumptions li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 8px; color: var(--ink-2); font-size: 13.5px; line-height: 1.45; }

@@ -16,6 +16,7 @@ from app.schemas.analytics import (
     ScenarioResponse,
     SnapshotCreate,
     SnapshotResponse,
+    SpendingSummaryResponse,
 )
 from app.services.analytics import (
     create_forecast,
@@ -42,6 +43,11 @@ def _snapshot_response(snapshot, patterns) -> SnapshotResponse:  # type: ignore[
         input_sha256=snapshot.input_sha256,
         engine_version=snapshot.engine_version,
         anomaly_results=snapshot.anomaly_results,
+        spending=(
+            SpendingSummaryResponse.model_validate(snapshot.spending_summary)
+            if snapshot.spending_summary is not None
+            else None
+        ),
         recurring_patterns=[RecurringPatternResponse.model_validate(item) for item in patterns],
         created_at=snapshot.created_at,
     )

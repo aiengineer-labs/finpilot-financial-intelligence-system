@@ -68,3 +68,26 @@ def test_excess_precision_is_rejected_per_row() -> None:
     result = parse_csv(content, mapping)
     assert not result.rows
     assert "two decimal" in result.errors[0].message
+
+
+@pytest.mark.parametrize(
+    ("merchant", "category"),
+    [
+        ("UPI/SWIGGY LIMITED/swiggyinstamart1online@merchantbank", "groceries"),
+        ("UPI/Swiggy Limited/swiggy1online@merchantbank", "dining"),
+        ("UPI/Zepto Marketplace/zepto@merchantbank", "groceries"),
+        ("UPI/Online Course Co/udemy@merchantbank", "education"),
+        ("Joining Fee", "fees_and_charges"),
+        ("GST", "fees_and_charges"),
+        ("Corner Coffee House", "dining"),
+        ("CAMPUS CANTEEN 13", "dining"),
+        ("Current account interest credit", "uncategorized"),
+        ("Coca Cola Vending", "uncategorized"),
+        ("Small Hardware Store", "uncategorized"),
+    ],
+)
+def test_category_keywords_match_at_word_starts(merchant: str, category: str) -> None:
+    from app.database.models import TransactionKind
+    from app.engines.categorization import classify_transaction
+
+    assert classify_transaction(merchant, "", TransactionKind.EXPENSE).category == category

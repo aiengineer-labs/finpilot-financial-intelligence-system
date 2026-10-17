@@ -32,7 +32,10 @@ type ProductMode = "demo" | "console" | "system";
 
 const LEDGER_PAGE = 200;
 const LEDGER_CAP = 1000;
-const DEFAULT_QUESTION = "Can I afford this purchase without jeopardizing my cash buffer?";
+const CARD_QUESTION = "Where can I reduce my credit-card spending?";
+const BANK_QUESTION = "How can I reduce my spending and save more money each month?";
+const SPENDING_QUESTION = "Where can I reduce my spending?";
+const DEFAULT_QUESTIONS = new Set([CARD_QUESTION, BANK_QUESTION, SPENDING_QUESTION]);
 const INITIAL_CONFIG: RunConfig = { asOf: "", horizon: 30, scenarioEnabled: false, scenarioName: "", scenarioAmount: "", scenarioDate: "" };
 const ACCOUNT_NAMES: Record<AccountType, string> = { deposit: "Bank account", credit_card: "Credit card", unknown: "Statement account" };
 
@@ -54,6 +57,12 @@ function normalizeConfig(next: RunConfig): RunConfig {
 /** Card statements and statements without a running balance support spending analysis only. */
 function isSpendingOnly(account: Account | undefined, items: Transaction[]) {
   return Boolean(items.length && (account?.account_type === "credit_card" || items.every((item) => item.balance_minor === null)));
+}
+
+/** The advisor's default question follows the statement kind until the user edits it. */
+function defaultQuestion(account: Account | undefined, items: Transaction[]) {
+  if (account?.account_type === "credit_card") return CARD_QUESTION;
+  return isSpendingOnly(account, items) ? SPENDING_QUESTION : BANK_QUESTION;
 }
 
 /** Latest day the engines can anchor on: the latest balance for cash flow, else the latest row. */
@@ -106,7 +115,7 @@ export function ProductConsole() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [architecture, setArchitecture] = useState<ArchitectureManifest | null>(null);
   const [config, setConfigState] = useState<RunConfig>(INITIAL_CONFIG);
-  const [question, setQuestion] = useState(DEFAULT_QUESTION);
+  const [question, setQuestion] = useState(BANK_QUESTION);
   const [busy, setBusy] = useState<Busy>(null);
   const [startupError, setStartupError] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -172,6 +181,7 @@ export function ProductConsole() {
     setTransactions(ledger.items);
     setTransactionTotal(ledger.total);
     setConfig({ asOf: analysisDate(active, ledger.items) });
+    setQuestion((current) => (DEFAULT_QUESTIONS.has(current) ? defaultQuestion(active, ledger.items) : current));
     const results = await Promise.allSettled([loadGovernance(scope), loadDigests(scope), loadArchitecture(scope)]);
     const failed = results.find((result) => result.status === "rejected");
     if (failed) push({ tone: "error", title: "Some workspace panels could not load", body: message(failed.reason, "Governance, digest, or architecture data is unavailable") });
@@ -307,7 +317,7 @@ export function ProductConsole() {
 
   /* ---------- analysis & advice ---------- */
 
-  async function runAnalysis(): Promise<{ forecast: Forecast; scenario: Scenario | null } | null> {
+  async function runAnalysis(): Promise<{ snapshot: Snapshot; forecast: Forecast | null; scenario: Scenario | null } | null> {
     if (!auth || !activeAccount || !transactions.length) {
       push({ tone: "error", title: "Import a statement first", body: "The analysis needs persisted ledger rows." });
       return null;
@@ -332,12 +342,15 @@ export function ProductConsole() {
       if (nextSnapshot.analysis_mode === "spending") {
         setForecast(null);
         setScenario(null);
+        const spend = nextSnapshot.spending;
         push({
           tone: "info",
           title: "Spending analysis ready",
-          body: `${nextSnapshot.source_transaction_count} rows · ${nextSnapshot.recurring_patterns.length} recurring patterns · ${nextSnapshot.anomaly_results.length} anomalies. Cash forecasting needs a statement with a running balance.`
+          body: spend
+            ? `${compactMoney(spend.projected_30_day_spend_minor)} projected 30-day spend · ${nextSnapshot.anomaly_results.length} anomalies. Asking the advisor where to cut back.`
+            : `${nextSnapshot.source_transaction_count} rows analysed.`
         });
-        return null;
+        return { snapshot: nextSnapshot, forecast: null, scenario: null };
       }
       const nextForecast = await request<Forecast>("/api/v1/analytics/forecasts", { method: "POST", body: JSON.stringify({ snapshot_id: nextSnapshot.id, horizon_days: config.horizon }) }, auth);
       setForecast(nextForecast);
@@ -355,7 +368,7 @@ export function ProductConsole() {
         title: nextScenario?.first_shortfall_date ? "Analysis complete — shortfall projected" : "Analysis complete",
         body: `${nextSnapshot.recurring_patterns.length} recurring patterns · ${nextSnapshot.anomaly_results.length} anomalies · low point ${compactMoney(nextScenario?.minimum_balance_minor ?? nextForecast.minimum_balance_minor)}`
       });
-      return { forecast: nextForecast, scenario: nextScenario };
+      return { snapshot: nextSnapshot, forecast: nextForecast, scenario: nextScenario };
     } catch (caught) {
       push({ tone: "error", title: "Analysis stopped safely", body: message(caught, "Could not calculate the forecast") });
       return null;
@@ -364,19 +377,24 @@ export function ProductConsole() {
     }
   }
 
-  async function askAdvisor(input?: { forecast: Forecast; scenario: Scenario | null }) {
-    const baseline = input?.forecast ?? forecast;
+  async function askAdvisor(input?: { snapshot: Snapshot; forecast: Forecast | null; scenario: Scenario | null }) {
+    const baseline = input ? input.forecast : forecast;
+    const grounding = input?.snapshot ?? snapshot;
     const branch = input ? input.scenario : scenario;
-    if (!auth || !baseline) {
-      push({ tone: "error", title: "Run the analysis first", body: "The advisor only reasons over a versioned forecast." });
+    if (!auth || (!baseline && !grounding)) {
+      push({ tone: "error", title: "Run the analysis first", body: "The advisor only reasons over a versioned snapshot or forecast." });
       return;
     }
+    // Card and balance-free statements are grounded in the snapshot's spending evidence.
+    const grounded = baseline
+      ? { forecast_id: baseline.id, scenario_id: branch?.id ?? null, question }
+      : { snapshot_id: grounding?.id, question };
     setBusy("advisor");
     setAgentRun(null);
     setVisibleEvents(0);
     setInspectorOpen(true);
     try {
-      const run = await request<AgentRun>("/api/v1/agent-runs", { method: "POST", body: JSON.stringify({ forecast_id: baseline.id, scenario_id: branch?.id ?? null, question }) }, auth);
+      const run = await request<AgentRun>("/api/v1/agent-runs", { method: "POST", body: JSON.stringify(grounded) }, auth);
       setAgentRun(run);
       setVisibleEvents(1);
       if (mode !== "demo") navigate("advice");
@@ -493,7 +511,8 @@ export function ProductConsole() {
   const completed = new Set<StageId>();
   if (transactions.length) { completed.add("import"); completed.add("categorize"); }
   if (snapshot) completed.add("analyze");
-  if (forecast) completed.add("forecast");
+  // A card statement's forecast is its projected 30-day spend.
+  if (forecast || snapshot?.analysis_mode === "spending") completed.add("forecast");
   if (agentRun) completed.add("advise");
   if (agentRun?.verification_status === "accept") completed.add("verify");
 
@@ -510,7 +529,7 @@ export function ProductConsole() {
     ...VIEWS.map((item) => ({ id: `view-${item.id}`, label: item.label, group: "Go to", icon: item.icon, run: () => navigate(item.id) })),
     { id: "sample", label: "Use fictional demo CSV", group: "Actions", icon: "flask", disabled: working, run: () => void importFile("sample") },
     { id: "analysis", label: "Run deterministic analysis", group: "Actions", icon: "play", disabled: working || !canAnalyse, run: () => { navigate("forecast"); void runAnalysis(); } },
-    { id: "advisor", label: "Ask the verified advisor", group: "Actions", icon: "advice", disabled: working || !forecast, run: () => void askAdvisor() },
+    { id: "advisor", label: "Ask the verified advisor", group: "Actions", icon: "advice", disabled: working || (!forecast && !snapshot), run: () => void askAdvisor() },
     { id: "inspector", label: inspectorOpen ? "Hide agent log" : "Show agent log", group: "Actions", icon: "terminal", run: () => setInspectorOpen((open) => !open) },
     { id: "download", label: "Download demo CSV", group: "Actions", icon: "download", run: () => { const link = document.createElement("a"); link.href = SAMPLE_STATEMENT.path; link.download = SAMPLE_STATEMENT.filename; link.click(); } },
     { id: "theme-light", label: "Light appearance", group: "Appearance", icon: "sun", run: () => setThemePreference("light") },
@@ -547,9 +566,9 @@ export function ProductConsole() {
           <button className="search-trigger" onClick={() => setPaletteOpen(true)} aria-label="Open command palette"><Icon name="search" size={15} /><span>Search or jump to…</span><Kbd>⌘K</Kbd></button>
           <ThemeToggle />
           <button className={`icon-btn ${inspectorOpen ? "active" : ""}`} onClick={() => setInspectorOpen((open) => !open)} aria-label="Toggle agent log" aria-pressed={inspectorOpen}><Icon name="terminal" size={17} />{agentRun && <span className="badge-dot" />}</button>
-          <button className="btn btn-primary run-btn" onClick={runPipeline} disabled={working || !canAnalyse} title={spendingOnly ? "Deterministic spending analysis" : "Deterministic analysis, then the Mesh-powered advisor graph"}>
+          <button className="btn btn-primary run-btn" onClick={runPipeline} disabled={working || !canAnalyse} title={spendingOnly ? "Deterministic spending analysis, then the Mesh-powered advisor graph" : "Deterministic analysis, then the Mesh-powered advisor graph"}>
             <Icon name={working ? "refresh" : "play"} size={13} className={working ? "spin" : ""} />
-            <span>{busy === "analysis" ? "Analysing…" : busy === "advisor" ? "Agents working…" : spendingOnly ? "Analyse spending" : "Run FinPilot"}</span>
+            <span>{busy === "analysis" ? "Analysing…" : busy === "advisor" ? "Agents working…" : "Run FinPilot"}</span>
           </button>
         </header>
 
@@ -558,7 +577,7 @@ export function ProductConsole() {
           {mode === "console" && view === "overview" && <Overview insights={insights} transactions={transactions} snapshot={snapshot} spendingOnly={spendingOnly} hasAccount={accounts.length > 0} busy={working} onNavigate={navigate} onLoadSample={() => void importFile("sample")} onRunAnalysis={() => void runAnalysis()} />}
           {mode === "console" && view === "ledger" && <Ledger transactions={transactions} total={transactionTotal} hasAccount={accounts.length > 0} busy={working} uploadResult={uploadResult} onUpload={(file) => void importFile(file)} onLoadSample={() => void importFile("sample")} onCreateAccount={() => void createAccount()} onCorrect={correctCategory} />}
           {mode === "console" && view === "forecast" && <ForecastView config={config} setConfig={setConfig} snapshot={snapshot} forecast={forecast} scenario={scenario} spendingOnly={spendingOnly} canRun={canAnalyse} busy={working} onRunAnalysis={() => void runAnalysis()} onAskAdvisor={() => void askAdvisor()} />}
-          {mode === "console" && view === "advice" && <AdvisorView run={agentRun} forecast={forecast} question={question} setQuestion={setQuestion} visibleEvents={visibleEvents} busy={working} onAsk={() => void askAdvisor()} />}
+          {mode === "console" && view === "advice" && <AdvisorView run={agentRun} ready={Boolean(forecast || snapshot)} question={question} setQuestion={setQuestion} visibleEvents={visibleEvents} busy={working} onAsk={() => void askAdvisor()} />}
           {mode === "console" && view === "audit" && <AuditView run={agentRun} />}
           {mode === "console" && view === "governance" && <GovernanceView data={governance} busy={working} createDemo={() => void createGovernanceDemo()} rejectReview={(id) => void rejectReview(id)} />}
           {mode === "console" && view === "digests" && <DigestView preference={digestPreference} notifications={notifications} busy={working} savePreference={(enabled) => void saveDigestPreference(enabled)} />}

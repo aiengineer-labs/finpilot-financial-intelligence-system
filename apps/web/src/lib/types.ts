@@ -22,9 +22,22 @@ export type Pattern = {
   confidence_bps: number; explanation?: string;
 };
 export type Anomaly = { transaction_id: string; severity: string; explanation: string };
+export type SpendingCategory = {
+  category: string; spend_minor: number; transaction_count: number; share_bps: number;
+  monthly_spend_minor: number; monthly_saving_minor: number;
+};
+export type SpendingMerchant = { merchant: string; spend_minor: number; transaction_count: number; monthly_spend_minor: number };
+export type RecurringCharge = { pattern_id: string; merchant: string; cadence: string; amount_minor: number; monthly_equivalent_minor: number };
+export type SpendingSummary = {
+  account_type: AccountType; period_start: string; period_end: string; period_days: number;
+  total_spend_minor: number; inflow_minor: number; refunds_minor: number; net_flow_minor: number;
+  savings_rate_bps: number | null; average_daily_spend_minor: number; projected_30_day_spend_minor: number;
+  reduction_percent: number; combined_monthly_saving_minor: number;
+  categories: SpendingCategory[]; merchants: SpendingMerchant[]; recurring_charges: RecurringCharge[];
+};
 export type Snapshot = {
   id: string; as_of: string; currency: string; opening_balance_minor: number | null;
-  analysis_mode: "cashflow" | "spending";
+  analysis_mode: "cashflow" | "spending"; spending: SpendingSummary | null;
   source_transaction_count: number; recurring_patterns: Pattern[]; anomaly_results: Anomaly[];
 };
 export type Point = { day: string; balance_minor: number; recurring_flow_minor: number; estimated_variable_spend_minor: number };
@@ -41,7 +54,8 @@ export type Recommendation = {
   verification_status: string;
 };
 export type AgentRun = {
-  id: string; status: string; verification_status: string; final_response: string; model_id: string;
+  id: string; forecast_id: string | null; intent: string;
+  status: string; verification_status: string; final_response: string; model_id: string;
   revision_attempts: number; total_latency_ms: number; total_input_tokens: number;
   total_output_tokens: number; events: AgentEvent[]; recommendations: Recommendation[];
 };

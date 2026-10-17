@@ -1,15 +1,26 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.database.models import AgentRunStatus, VerificationStatus
 
 
 class AgentRunCreate(BaseModel):
-    forecast_id: UUID
+    """Advice is grounded in a cash forecast or, for balance-free statements, a snapshot."""
+
+    forecast_id: UUID | None = None
+    snapshot_id: UUID | None = None
     scenario_id: UUID | None = None
     question: str = Field(min_length=3, max_length=1000)
+
+    @model_validator(mode="after")
+    def one_grounding(self) -> "AgentRunCreate":
+        if (self.forecast_id is None) == (self.snapshot_id is None):
+            raise ValueError("provide exactly one of forecast_id or snapshot_id")
+        if self.scenario_id is not None and self.forecast_id is None:
+            raise ValueError("scenario_id requires forecast_id")
+        return self
 
 
 class AgentEventResponse(BaseModel):
@@ -49,7 +60,7 @@ class AgentRunResponse(BaseModel):
 
     id: UUID
     snapshot_id: UUID
-    forecast_id: UUID
+    forecast_id: UUID | None
     scenario_run_id: UUID | None
     question: str
     intent: str

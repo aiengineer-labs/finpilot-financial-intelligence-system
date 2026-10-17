@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import date
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -30,8 +31,9 @@ from app.engines.financial import (
     detect_recurrence,
     run_scenario,
 )
+from app.engines.spending import RecurringCharge, SpendingRow, summarize_spending
 
-ENGINE_VERSION = "financial-v2"
+ENGINE_VERSION = "financial-v3"
 
 
 def _engine_transaction(row: Transaction) -> EngineTransaction:
@@ -195,9 +197,76 @@ async def create_snapshot(
         for pattern in recurrences
     ]
     session.add_all(stored_patterns)
+    await session.flush()
+    snapshot.spending_summary = _spending_summary(account, rows, stored_patterns)
     await session.commit()
     await session.refresh(snapshot)
     return snapshot, stored_patterns
+
+
+def _spending_summary(
+    account: FinancialAccount,
+    rows: list[Transaction],
+    patterns: list[StoredRecurringPattern],
+) -> dict[str, Any]:
+    return summarize_spending(
+        [
+            SpendingRow(
+                day=row.transaction_date,
+                amount_minor=row.amount_minor,
+                category=row.category,
+                merchant=row.merchant_normalized,
+                kind=row.kind.value,
+                excluded=row.is_excluded_from_cashflow,
+            )
+            for row in rows
+        ],
+        [
+            RecurringCharge(
+                pattern_id=str(pattern.id),
+                merchant=pattern.merchant,
+                cadence=pattern.cadence,
+                amount_minor=-pattern.typical_amount_minor,
+                period_days=pattern.period_days,
+            )
+            for pattern in patterns
+            if pattern.typical_amount_minor < 0
+        ],
+        account_type=account.account_type.value,
+    )
+
+
+async def snapshot_spending_summary(
+    session: AsyncSession, *, tenant_id: UUID, snapshot: CalculationSnapshot
+) -> dict[str, Any]:
+    """Return the frozen spending summary, rebuilding it for snapshots that predate it."""
+
+    if snapshot.spending_summary is not None:
+        return snapshot.spending_summary
+    account = await session.scalar(
+        select(FinancialAccount).where(
+            FinancialAccount.id == snapshot.account_id, FinancialAccount.tenant_id == tenant_id
+        )
+    )
+    if account is None:
+        raise LookupError("account not found")
+    rows = list(
+        await session.scalars(
+            select(Transaction).where(
+                Transaction.tenant_id == tenant_id,
+                Transaction.id.in_([UUID(value) for value in snapshot.source_transaction_ids]),
+            )
+        )
+    )
+    patterns = list(
+        await session.scalars(
+            select(StoredRecurringPattern).where(
+                StoredRecurringPattern.tenant_id == tenant_id,
+                StoredRecurringPattern.snapshot_id == snapshot.id,
+            )
+        )
+    )
+    return _spending_summary(account, rows, patterns)
 
 
 async def get_snapshot(

@@ -71,7 +71,7 @@ def _artifact_specs(settings: Settings) -> tuple[tuple[str, str, str, dict[str, 
         (
             "categorization",
             "transaction-rules",
-            "categorization-rules-v1",
+            "categorization-rules-v2",
             {"low_confidence_route": "mesh_required", "human_correction_lineage": True},
         ),
         (

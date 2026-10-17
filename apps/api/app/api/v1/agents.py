@@ -54,6 +54,7 @@ async def post_agent_run(
             tenant_id=context.tenant_id,
             user_id=context.user.id,
             forecast_id=body.forecast_id,
+            snapshot_id=body.snapshot_id,
             scenario_id=body.scenario_id,
             question=body.question,
         )

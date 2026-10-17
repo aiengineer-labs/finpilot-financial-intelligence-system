@@ -148,7 +148,14 @@ class AdviceWorkflow:
         return cast(AdviceState, await self.graph.ainvoke(initial))
 
     async def _supervisor(self, state: AdviceState) -> dict[str, Any]:
-        intent = "scenario_advice" if state["context"].get("scenario_id") else "forecast_advice"
+        context = state["context"]
+        if context.get("scenario_id"):
+            intent = "scenario_advice"
+        elif context.get("forecast"):
+            intent = "forecast_advice"
+        else:
+            # Card and balance-free statements: advice on reducing spending.
+            intent = "spending_advice"
         event = {
             "node": "supervisor",
             "event_type": "route",

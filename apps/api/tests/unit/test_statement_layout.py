@@ -153,7 +153,7 @@ def test_money_parser_accepts_currency_marks_and_suffixes() -> None:
         (
             "S No.,Value Date,Transaction Date,Cheque Number,Transaction Remarks,"
             "Withdrawal Amount (INR ),Deposit Amount (INR ),Balance (INR )",
-            '1,01/08/2026,01/08/2026,-,UPI/Grocer/okicici,170.00,0.00,"50,830.00"',
+            '1,01/08/2026,01/08/2026,-,UPI/Grocer/merchantbank,170.00,0.00,"50,830.00"',
             '2,02/08/2026,02/08/2026,-,NEFT-SALARY ACME,0.00,"25,000.00","75,830.00"',
         ),
         (

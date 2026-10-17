@@ -4,7 +4,7 @@ import { addDays, compactMoney, dayDiff, exactMoney, humanize, longDate, money, 
 function readable(assumption: string) {
   return assumption.replace(/(-?\d+) minor units(\/day)?/g, (_, value: string, perDay?: string) => `${exactMoney(Number(value))}${perDay ? " per day" : ""}`);
 }
-import type { Forecast, Scenario, Snapshot } from "@/lib/types";
+import type { Forecast, Scenario, Snapshot, SpendingSummary } from "@/lib/types";
 import { type ChartMarker, LineChart } from "../ui/charts";
 import { Icon } from "../ui/icons";
 import { EmptyState, Meter, Panel, PanelHeader, Pill, Segmented, StatTile, Switch } from "../ui/primitives";
@@ -53,7 +53,7 @@ export function ForecastView({ config, setConfig, snapshot, forecast, scenario, 
         )}
         <div className="button-row end">
           <small className="muted">{!config.asOf ? "Import a statement to choose a date" : spendingOnly ? `Analyses every row up to ${shortDate(config.asOf)}` : `Projects ${shortDate(addDays(config.asOf, 1))} – ${shortDate(addDays(config.asOf, config.horizon))}`}</small>
-          {!spendingOnly && <button className="btn btn-glass" onClick={onAskAdvisor} disabled={busy || !forecast}><Icon name="advice" size={14} />Ask advisor</button>}
+          <button className="btn btn-glass" onClick={onAskAdvisor} disabled={busy || (!forecast && !spendingSnapshot)}><Icon name="advice" size={14} />Ask advisor</button>
           <button className="btn btn-primary" onClick={onRunAnalysis} disabled={busy || !canRun}><Icon name="play" size={13} />{busy ? "Calculating…" : spendingOnly ? "Analyse spending" : "Run analysis"}</button>
         </div>
       </Panel>
@@ -117,25 +117,47 @@ function ForecastResult({ snapshot, forecast, scenario }: { snapshot: Snapshot; 
         </div>
       </Panel>
 
+      {snapshot.spending && <SpendingBreakdown spending={snapshot.spending} />}
       <SnapshotEvidence snapshot={snapshot} recurringTitle="Recurring flows in the projection" />
     </>
   );
 }
 
 function SpendingResult({ snapshot }: { snapshot: Snapshot }) {
-  const high = snapshot.anomaly_results.filter((item) => item.severity === "high").length;
+  const spending = snapshot.spending;
   return (
     <>
       <div className="span-12 stat-row">
-        <StatTile icon="doc" label="Rows analysed" value={snapshot.source_transaction_count} detail={`Up to ${longDate(snapshot.as_of)}`} />
-        <StatTile icon="repeat" label="Recurring charges" value={snapshot.recurring_patterns.length} detail="Detected from repeated merchant and date evidence" />
-        <StatTile icon="alert" label="Anomalies" value={snapshot.anomaly_results.length} tone={high ? "bad" : "good"} detail={high ? `${high} high severity` : "No high-severity outliers"} />
-        <StatTile icon="lock" label="Cash forecast" value="Not available" detail="No running balance in this statement" />
+        <StatTile icon="forecast" label="Projected 30-day spend" value={spending ? compactMoney(spending.projected_30_day_spend_minor) : "—"} detail={spending ? `At the ${spending.period_days}-day statement pace` : "Re-run the analysis"} />
+        <StatTile icon="wallet" label="Average per day" value={spending ? money(spending.average_daily_spend_minor) : "—"} detail={spending ? `${money(spending.total_spend_minor)} spent ${shortDate(spending.period_start)} – ${shortDate(spending.period_end)}` : undefined} />
+        <StatTile icon="bolt" label="Possible monthly saving" value={spending ? money(spending.combined_monthly_saving_minor) : "—"} tone="good" detail={spending ? `${spending.reduction_percent}% less in the top three categories` : undefined} />
+        <StatTile icon="alert" label="Anomalies" value={snapshot.anomaly_results.length} detail={`${snapshot.source_transaction_count} rows analysed`} />
       </div>
       <Panel className="span-12">
-        <div className="callout info"><Icon name="info" size={16} /><p>This is a <b>spending analysis</b>. The statement carries no running balance (for example a credit-card statement), so FinPilot does not invent one or project cash. Upload a bank statement with balances to enable the forecast and advisor.</p></div>
+        <div className="callout info"><Icon name="info" size={16} /><p>This statement has no running balance (for example a credit-card statement), so the forecast is a <b>spending projection</b> rather than a cash balance. The advisor recommends where to cut back, and every amount it cites is checked against these figures.</p></div>
       </Panel>
+      {spending && <SpendingBreakdown spending={spending} />}
       <SnapshotEvidence snapshot={snapshot} recurringTitle="Recurring charges and credits" />
+    </>
+  );
+}
+
+function SpendingBreakdown({ spending }: { spending: SpendingSummary }) {
+  return (
+    <>
+      <Panel className="span-7">
+        <PanelHeader eyebrow="WHERE THE MONEY GOES" title="Top spending categories" subtitle={`Monthly pace and the saving from a ${spending.reduction_percent}% cut`} />
+        {spending.categories.length ? (
+          <div className="table-wrap"><table className="table compact">
+            <thead><tr><th>Category</th><th>Share</th><th className="num">Per month</th><th className="num">Save {spending.reduction_percent}%</th></tr></thead>
+            <tbody>{spending.categories.map((item) => <tr key={item.category}><td><b>{humanize(item.category)}</b><small className="muted"> · {item.transaction_count} payments</small></td><td><div className="provenance"><span>{percentFromBps(item.share_bps)}</span><Meter value={item.share_bps / 100} /></div></td><td className="num">{money(item.monthly_spend_minor)}</td><td className="num positive">{money(item.monthly_saving_minor)}</td></tr>)}</tbody>
+          </table></div>
+        ) : <EmptyState icon="overview" title="No spending in this period" />}
+      </Panel>
+      <Panel className="span-5">
+        <PanelHeader eyebrow="MERCHANTS" title="Biggest merchants" subtitle={spending.savings_rate_bps !== null ? `Savings rate ${percentFromBps(spending.savings_rate_bps)} of inflow` : "Card spending by merchant"} />
+        <ul className="signal-list">{spending.merchants.map((item) => <li key={item.merchant}><span className="signal-icon"><Icon name="wallet" size={15} /></span><div><b>{titleCase(item.merchant)}</b><small className="muted">{item.transaction_count} payments · {money(item.monthly_spend_minor)} per month</small></div><strong>{money(item.spend_minor)}</strong></li>)}</ul>
+      </Panel>
     </>
   );
 }
