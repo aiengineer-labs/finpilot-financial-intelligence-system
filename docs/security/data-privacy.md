@@ -8,12 +8,14 @@ FinPilot treats credentials, tenant membership, transaction records, uploaded st
 - The browser receives only records authorized by server-side membership checks.
 - Mesh receives a minimized calculation context only during an explicitly requested agent run. It never receives database credentials, session secrets or tenant authorization data.
 - When **Run FinPilot** starts, or a categorization run is requested, Mesh also receives the statement labels that the keyword rules could not place. Each label is the merchant and description, with no other row data:
-  - The text is cut to 96 characters, and digit runs of six or more become `<REF>`.
+  - UPI handles are replaced with `<merchant-upi>` or `<personal-upi>`, so phone-number and name handles are never sent.
+  - Transaction IDs that mix letters and digits, and digit runs of six or more, are removed.
+  - The text is cut to 96 characters.
   - The injection policy screens it, and a blocked label is never sent.
   - Presidio minimizes it.
   - Duplicates are sent once, with only a debit or credit direction.
 
-  Amounts, balances, dates, account identifiers and row IDs are never sent. The label text itself is not stored in the categorization audit records; they keep only label IDs, categories and confidence.
+  Amounts, balances, dates, account identifiers and row IDs are never sent. Payee names are sent, including the names of people paid by UPI. The categorizer needs them to tell a shop from a person, and Presidio's pattern recognizers do not remove names. The label text itself is not stored in the categorization audit records; they keep only label IDs, categories and confidence.
 - The original user question is retained with the tenant-scoped execution record for audit. The model receives the Presidio-minimized version.
 
 ## Minimization and logging

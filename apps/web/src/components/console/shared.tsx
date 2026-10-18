@@ -37,8 +37,9 @@ export function categorySlices(categories: CategorySlice[]) {
 
 export const KNOWN_CATEGORIES = [
   "housing", "groceries", "dining", "transport", "shopping", "utilities", "entertainment",
-  "healthcare", "subscriptions", "education", "fees_and_charges", "salary", "other_income", "refund",
-  "transfer", "fitness", "insurance", "uncategorized"
+  "healthcare", "subscriptions", "education", "fees_and_charges", "payments_to_people",
+  "cash_withdrawal", "salary", "other_income", "refund", "transfer", "fitness", "insurance",
+  "uncategorized"
 ];
 
 export const VIEWS: Array<{ id: View; label: string; icon: IconName; group: "Workspace" | "Assurance" | "Learn"; subtitle: string }> = [

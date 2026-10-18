@@ -1,7 +1,7 @@
 "use client";
 
 import { dateTime, humanize, longDate } from "@/lib/format";
-import type { DigestPreference, GovernanceData, GovernanceRisk, Notification } from "@/lib/types";
+import type { DigestPreference, EvaluationRun, GovernanceData, GovernanceRisk, Notification } from "@/lib/types";
 import { Icon } from "../ui/icons";
 import { EmptyState, Panel, PanelHeader, Pill, StatTile, Switch, type Tone } from "../ui/primitives";
 
@@ -20,6 +20,7 @@ function statusTone(status: string): Tone {
 
 function blockerLabel(blocker: string) {
   if (blocker === "evaluation:mesh-model-redteam:not_run") return "Model security check has not run";
+  if (blocker === "evaluation:mesh-model-redteam:fail") return "Model security test did not pass";
   if (blocker.startsWith("evaluation:")) return `${humanize(blocker.split(":")[1] ?? "evaluation")} needs attention`;
   if (blocker.startsWith("risk:")) return `${blocker.split(":")[1] ?? "Risk"} requires review`;
   return humanize(blocker.replaceAll(":", " "));
@@ -29,6 +30,27 @@ function evaluationFailure(failure: string) {
   return failure === "External Mesh egress approval pending"
     ? "Run the model security suite to complete this check."
     : failure;
+}
+
+function runDuration(ms: number) {
+  if (!ms) return "Not run yet";
+  return ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : ms >= 1_000 ? `${(ms / 1_000).toFixed(1)} s` : `${ms} ms`;
+}
+
+/** The measured outcome in words, from the run's own metrics. */
+function evaluationOutcome(item: EvaluationRun) {
+  const { cases, failed, errors, critical_failed: critical } = item.metrics;
+  if (typeof cases !== "number" || typeof failed !== "number") return null;
+  const parts = [`${cases} attacks`, `${failed} succeeded`];
+  if (typeof critical === "number") parts.push(`${critical} critical`);
+  if (typeof errors === "number" && errors) parts.push(`${errors} incomplete`);
+  return parts.join(" · ");
+}
+
+/** The API keeps every record as history; the gate and this list use the newest per check. */
+function latestPerCheck(evaluations: EvaluationRun[]) {
+  const seen = new Set<string>();
+  return evaluations.filter((item) => !seen.has(item.dataset_id) && Boolean(seen.add(item.dataset_id)));
 }
 
 type GovernanceProps = { data: GovernanceData | null; busy: boolean; createDemo: () => void; rejectReview: (id: string) => void };
@@ -61,13 +83,13 @@ export function GovernanceView({ data, busy, createDemo, rejectReview }: Governa
         <PanelHeader eyebrow="AI READINESS" title="Quality checks" subtitle="Independent checks required before a model or prompt change is released" />
         {data.evaluations.length ? (
           <ul className="gate-list">
-            {data.evaluations.map((item) => (
+            {latestPerCheck(data.evaluations).map((item) => (
               <li key={item.id}>
                 <span className={`gate-status ${item.status}`}><Icon name={item.status === "pass" ? "check" : item.status === "not_run" ? "clock" : "alert"} size={16} /></span>
                 <div>
                   <header><b>{item.dataset_id === "mesh-model-redteam" ? "Model security test" : "Prompt-injection test"}</b><Pill tone={statusTone(item.status)}>{item.status === "not_run" ? "Action needed" : humanize(item.status)}</Pill></header>
                   <p>{item.dataset_id === "mesh-model-redteam" ? "Challenges the live AI model with adversarial financial prompts." : "Checks that statement text cannot override FinPilot's safety rules."}</p>
-                  <div className="gate-meta"><span>{item.duration_ms ? `${item.duration_ms} ms` : "Not run yet"}</span>{item.model_id && <span>{item.model_id}</span>}<span>Code {item.code_version}</span></div>
+                  <div className="gate-meta"><span>{runDuration(item.duration_ms)}</span>{evaluationOutcome(item) && <span>{evaluationOutcome(item)}</span>}{item.model_id && <span>{item.model_id}</span>}<span>Code {item.code_version}</span></div>
                   {item.failures.map((failure) => <em key={failure}>{evaluationFailure(failure)}</em>)}
                 </div>
               </li>

@@ -11,10 +11,17 @@ class Classification:
     confidence_bps: int
 
 
+RULES_VERSION = "categorization-rules-v3"
+
 # Order matters: the first matching category wins (e.g. "swiggyinstamart" is groceries
 # before "swiggy" is dining). Keywords match at the start of a word, so UPI handles such as
 # "swiggy1online@merchantbank" match while "coffee" does not match "fee".
 _CATEGORY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # ATM rows such as "NFS/CASH WDL/..." are recognisable without a model.
+    (
+        "cash_withdrawal",
+        ("cash wdl", "atm wdl", "cash withdrawal", "atm withdrawal", "atm cash"),
+    ),
     ("housing", ("rent", "landlord", "maintenance society", "housing society")),
     (
         "groceries",
@@ -75,10 +82,13 @@ _CATEGORY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 # refunds are decided by code only, and the fallback category means "still unclear".
 EXPENSE_FALLBACK = "uncategorized"
 INCOME_FALLBACK = "other_income"
+PEOPLE_PAYMENTS = "payments_to_people"
 SEMANTIC_EXPENSE_CATEGORIES: tuple[str, ...] = (
     *(category for category, _ in _CATEGORY_RULES if category != "salary"),
     "insurance",
     "fitness",
+    # Only a model can tell a person's name from a shop's, so no keyword rule assigns this.
+    PEOPLE_PAYMENTS,
     EXPENSE_FALLBACK,
 )
 SEMANTIC_INCOME_CATEGORIES: tuple[str, ...] = ("salary", INCOME_FALLBACK)

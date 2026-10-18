@@ -60,7 +60,12 @@ flowchart TB
   DIGEST -->|"insights · notifications"| LEDGER
 ```
 
-1. **Import and categorize.** The intake shield detects the real format from the file's bytes, then checks that the extension and MIME type agree with it. It enforces size, row, and PDF structure budgets. Renamed, encrypted, active-content, attachment-bearing, malformed, scanned, and over-budget files fail closed with stable error codes. The CSV or text-PDF adapter extracts rows with parser and source-line provenance. Amounts become exact integer minor units. Transfers, refunds, and duplicate rows are classified, and replaying the same upload returns the original import. A statement whose rows carry a running balance is a `deposit` account. Card statements are `credit_card`. Card and bank rows are never mixed in one account. Rules (`categorization-rules-v2`) label each row, and rows they cannot place are flagged `mesh_required`. When **Run FinPilot** starts, those rows go to the Mesh categorizer, which proposes one category from a fixed list for each distinct label. The labels are bounded, screened, Presidio-minimized and de-duplicated, and carry no amounts. Code applies a proposal only when it fits the row's debit or credit direction and has at least 70% confidence. Applied rows are stored as `mesh` with confidence capped at 85%, below the rules' 90%. The run saves every answer, applied or not, with the previous category. A reviewer can still correct any category with recorded lineage, and a human correction is never overwritten. Import itself never calls Mesh. If the categorizer fails, analysis continues with the rule categories.
+1. **Import and categorize.** The intake shield detects the real format from the file's bytes, then checks that the extension and MIME type agree with it. It enforces size, row, and PDF structure budgets. Renamed, encrypted, active-content, attachment-bearing, malformed, scanned, and over-budget files fail closed with stable error codes. The CSV or text-PDF adapter extracts rows with parser and source-line provenance. Amounts become exact integer minor units. Transfers, refunds, and duplicate rows are classified, and replaying the same upload returns the original import. A statement whose rows carry a running balance is a `deposit` account. Card statements are `credit_card`. Card and bank rows are never mixed in one account. Rules (`categorization-rules-v3`) label each row, and rows they cannot place are flagged `mesh_required`. ATM withdrawals are matched by a keyword rule (`cash_withdrawal`). When **Run FinPilot** starts, the `mesh_required` rows go to the Mesh categorizer, which proposes one category from a fixed list for each distinct payee label. Before sending:
+   - transaction IDs and long reference numbers are removed, so repeat payments to one payee share a label
+   - each UPI handle becomes `<merchant-upi>` or `<personal-upi>`, so Mesh can tell a shop from a person (`payments_to_people`)
+   - labels are bounded, injection-screened and Presidio-minimized, and they carry no amounts
+
+   Payee names are still sent. Code applies a proposal only when it fits the row's debit or credit direction and has at least 70% confidence. Applied rows are stored as `mesh` with confidence capped at 85%, below the rules' 90%. The run saves every answer, applied or not, with the previous category. A reviewer can still correct any category with recorded lineage, and a human correction is never overwritten. Import itself never calls Mesh. If the categorizer fails, analysis continues with the rule categories.
 2. **Analyze.** A snapshot (`financial-v3`) freezes the evidence for one account and one as-of date. It records recurring patterns, robust anomalies, and a spending summary: totals, monthly pace, top categories and merchants, the monthly saving from a 20% cut, recurring charges, and, for bank accounts, net flow and savings rate. Bank statements run in `cashflow` mode and can produce 30/60/90-day daily forecasts and what-if branches. Card and balance-free statements run in `spending` mode with a null opening balance. A forecast request against them returns 422.
 3. **Advise and verify.** An agent run is grounded in exactly one forecast (with an optional scenario) or one snapshot. The graph below produces typed recommendations, and the verifier decides whether any of them is released.
 
@@ -178,8 +183,8 @@ Governance registers each artifact by version and hash, and the runtime uses app
 | Specialist prompts | `advice-prompts-v4` |
 | Financial verifier | `financial-verifier-v1` |
 | Financial engines | `financial-v3` |
-| Categorization rules | `categorization-rules-v2` |
-| Categorizer prompt | `categorizer-prompts-v1` |
+| Categorization rules | `categorization-rules-v3` |
+| Categorizer prompt | `categorizer-prompts-v2` |
 | NeMo Guardrails policy | `finpilot-nemo-v2` |
 | Presidio minimization | `finpilot-presidio-v1` |
 | CSV and PDF parsers | `2` and `2` |
@@ -196,12 +201,12 @@ git diff --check
 
 These are the latest results recorded in [implementation status](docs/IMPLEMENTATION_STATUS.md) (2026-10-17):
 
-- **Backend:** 301 pytest tests at 85% line coverage, and 207 security tests passing.
+- **Backend:** 303 pytest tests at 85% line coverage, and 207 security tests passing.
 - **Web:** ESLint with zero warnings, strict TypeScript, and a Next.js production build inside the Docker image.
 - **Smoke:** `make smoke` passed 16/16 checks on the last recorded run.
 - **Promptfoo:** the offline corpus passed 184/184 cases: 0 of 168 attacks missed, and 0 false positives among 16 legitimate controls.
 - **Live Mesh advice:** synthetic-sample runs through the web gateway completed 3 of 3 with `ACCEPT`, taking 23.5–26.0 s each.
-- **Live Mesh categorization:** on the synthetic household dataset, one call sent 2 labels covering 5 unclear rows and took 1.9 s. It applied `fitness` to 3 rows, left the 2 rows answered with the fallback for review, and changed no amounts. A repeat request made no model call.
+- **Live Mesh categorization (`categorizer-prompts-v2`):** on a synthetic UPI statement, one call sent 4 payee labels covering 5 unclear rows and took 3.3 s. It applied all 5: a merchant-QR shop became `groceries`, a tiffin centre became `dining`, and two personal UPI payments became `payments_to_people`. Rules handled the ATM and "Medicals" rows without Mesh. No amounts changed, and a repeat request made no model call.
 
 Methodology and evidence are in [evaluation results](docs/evaluation/results.md).
 

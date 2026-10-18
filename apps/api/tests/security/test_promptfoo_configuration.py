@@ -40,10 +40,21 @@ def test_model_based_promptfoo_roles_use_mesh_only() -> None:
     assert config["defaultTest"]["options"]["provider"] == MESH_PROVIDER
     assert config["redteam"]["provider"] == MESH_PROVIDER
     assert config["targets"] == [
-        {"id": "file://policy_provider.py", "label": "finpilot-production-input-policy"}
+        {"id": "file://live_advice_provider.py", "label": "finpilot-live-advisor"}
     ]
     assert config["sharing"] is False
     assert config["writeLatestResults"] is False
+
+
+def test_redteam_target_reaches_the_model_only_through_finpilot() -> None:
+    """The target asks FinPilot's own API, so every attack meets the production guardrails."""
+
+    source = (PROMPTFOO_ROOT / "live_advice_provider.py").read_text(encoding="utf-8")
+    assert 'os.environ.get("FINPILOT_API_URL", "http://api:8000")' in source
+    assert "/api/v1/agent-runs" in source
+    for direct in ("meshapi", "openai", "anthropic", "MESH_API_KEY"):
+        assert direct not in source
+    assert "synthetic_household_v1.csv" in source
 
 
 def test_redteam_avoids_promptfoo_remote_only_plugins_and_strategies() -> None:
