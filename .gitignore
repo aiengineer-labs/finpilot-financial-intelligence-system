@@ -58,6 +58,8 @@ pnpm-debug.log*
 
 # --- Evaluation output -----------------------------------------------------------
 evaluation/promptfoo/.promptfoo/
+# Generated attack cases sit beside the target script so its relative path resolves.
+evaluation/promptfoo/redteam.generated.yaml
 evaluation/reports/promptfoo-*.html
 
 # --- Tool caches, logs, and OS/editor noise ------------------------------------

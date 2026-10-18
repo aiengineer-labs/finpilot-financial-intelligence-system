@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.specialists import (
     CATEGORIZER_PROMPT_VERSION,
     MAX_CATEGORIZER_LABELS,
+    MERCHANT_UPI_MARKER,
+    PERSONAL_UPI_MARKER,
     CategorizerAgent,
     CategorizerOutput,
 )
@@ -45,7 +47,14 @@ from app.services.governance import approved_artifact_lineage, ensure_governance
 from app.services.transaction_import import find_account
 
 MAX_LABEL_CHARS = 96
+# A UPI handle such as "q123456789@ybl" or "name@okaxis"; an email address is left to Presidio.
+_UPI_HANDLE = re.compile(r"[A-Za-z0-9._-]+@[A-Za-z]*(?![A-Za-z.])")
+# Merchant QR and business handles: PhonePe "q<digits>", Paytm, BharatPe and "...qr" handles.
+_MERCHANT_HANDLE = re.compile(r"^(?:q\d|paytm|bharatpe|mab\.|pos|[a-z0-9._-]*qr)", re.IGNORECASE)
+# Transaction IDs mix letters and digits ("ICI3a2b1c..."); short codes such as P2M are kept.
+_MIXED_REFERENCE = re.compile(r"\b(?=[A-Za-z]*\d)(?=\d*[A-Za-z])[A-Za-z0-9]{6,}\b")
 _REFERENCE_DIGITS = re.compile(r"\d{6,}")
+_SEPARATORS = re.compile(r"(?:\s*[/|]\s*)+")
 _SEMANTIC_KINDS = (TransactionKind.EXPENSE, TransactionKind.INCOME)
 _FIXED_REQUEST = "Categorize the supplied statement labels."
 
@@ -70,21 +79,42 @@ class _Label:
     transaction_ids: list[UUID]
 
 
+def _upi_marker(match: re.Match[str]) -> str:
+    handle = match.group(0)
+    return MERCHANT_UPI_MARKER if _MERCHANT_HANDLE.match(handle) else PERSONAL_UPI_MARKER
+
+
 def _label_text(row: Transaction) -> str:
+    """The payee words of a statement line, without handles, references or account numbers.
+
+    Removing the per-row identifiers keeps private data out of the request and lets repeat
+    payments to the same payee share one label.
+    """
+
     merchant = row.merchant_raw.strip()
     description = row.description.strip()
     text = merchant
     if description and description.casefold() not in merchant.casefold():
         text = f"{merchant} - {description}" if merchant else description
-    # Long digit runs are references or account numbers: noise for a category, and private.
-    text = _REFERENCE_DIGITS.sub("<REF>", " ".join(text.split()))
-    return text[:MAX_LABEL_CHARS]
+    text = _UPI_HANDLE.sub(_upi_marker, text)
+    text = _MIXED_REFERENCE.sub(" ", text)
+    text = _REFERENCE_DIGITS.sub(" ", text)
+    text = _SEPARATORS.sub(" / ", text)
+    return " ".join(text.split()).strip(" /-")[:MAX_LABEL_CHARS]
 
 
 def _pending_rows_query(tenant_id: UUID, account_id: UUID) -> Any:
-    """Rows the rules routed to Mesh that no categorization run has answered yet."""
+    """Rows routed to Mesh that the current categorizer prompt has not answered yet.
 
-    answered = exists().where(CategorizationDecision.transaction_id == Transaction.id)
+    An answer from an older prompt version does not count, so a prompt with new categories
+    gets to look again at rows its predecessor left unclear.
+    """
+
+    answered = exists().where(
+        CategorizationDecision.transaction_id == Transaction.id,
+        CategorizationDecision.run_id == CategorizationRun.id,
+        CategorizationRun.prompt_version == CATEGORIZER_PROMPT_VERSION,
+    )
     return select(Transaction).where(
         Transaction.tenant_id == tenant_id,
         Transaction.account_id == account_id,

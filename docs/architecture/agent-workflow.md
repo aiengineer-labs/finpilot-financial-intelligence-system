@@ -22,7 +22,11 @@ The supervisor receives a fixed context assembled from authorized snapshot, fore
 Categorization runs before analysis, outside the advice graph.
 
 1. Keyword rules label each imported row. Rows they cannot place are marked `mesh_required`.
-2. A categorization run sends up to 40 distinct labels for those rows to the categorizer agent through the same Mesh adapter, NeMo output rail and Presidio minimization. Rows answered by an earlier run are not sent again.
+2. A categorization run sends up to 40 distinct labels for those rows to the categorizer agent through the same Mesh adapter, NeMo output rail and Presidio minimization. Each label is the payee text of a statement line:
+   - Transaction IDs and long reference numbers are removed, so repeat payments to one payee share a label.
+   - Each UPI handle is replaced with `<merchant-upi>` (merchant QR or business handle) or `<personal-upi>`.
+
+   Rows the current prompt version has answered are not sent again. Rows an older version left unclear are asked again.
 3. The agent returns one category and a confidence for each `label_id`, under a strict JSON Schema whose category enum is the fixed list.
 4. Code applies a proposal only when all of these hold:
    - the category is allowed for the row's debit or credit direction
@@ -32,7 +36,7 @@ Categorization runs before analysis, outside the advice graph.
    Applied rows become `mesh` with confidence capped at 8500 bps. The run persists every answer, applied or not, as a `categorization_decisions` row with the previous category.
 5. A human correction made before or during the call always wins.
 
-The agent never sees amounts and cannot change kinds, transfers, refunds or balances.
+The agent never sees amounts and cannot change kinds, transfers, refunds or balances. `payments_to_people` exists only for the agent, because only a model can tell a person's name from a shop's. ATM withdrawals (`cash_withdrawal`) are a keyword rule and never reach the model.
 
 The verifier is ordinary Python. It checks evidence identifiers, currencies, amounts, confidence, forbidden certainty, and deterministic constraints. Rejected output is withheld; the service persists reasons, exact governance artifact IDs, and a human-review case.
 

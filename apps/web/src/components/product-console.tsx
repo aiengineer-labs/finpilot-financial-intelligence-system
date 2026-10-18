@@ -32,8 +32,9 @@ type ProductMode = "demo" | "console" | "system";
 
 const LEDGER_PAGE = 200;
 const LEDGER_CAP = 1000;
-// Each pass sends at most 40 distinct labels; three passes cover large statements.
-const CATEGORIZE_PASSES = 3;
+// Each pass sends at most 40 distinct payee labels (about 13 s); six passes cover a large
+// bank statement in one click.
+const CATEGORIZE_PASSES = 6;
 const CARD_QUESTION = "Where can I reduce my credit-card spending?";
 const BANK_QUESTION = "How can I reduce my spending and save more money each month?";
 const SPENDING_QUESTION = "Where can I reduce my spending?";

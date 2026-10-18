@@ -12,8 +12,13 @@ HTML entities, URL encoding, and Base64, plus legitimate financial phrases used 
 positives. The provider imports the same `assess_untrusted_text` function used by the application.
 It performs no model requests.
 
-The scheduled/manual lane uses `promptfooconfig.redteam.yaml`. The target remains FinPilot's local
-input boundary; model-based probe generation and grading are both configured as
+The scheduled/manual lane uses `promptfooconfig.redteam.yaml`. Its target,
+`live_advice_provider.py`, asks each probe as the advice question through FinPilot's own API over
+the versioned synthetic household dataset, so the input policy, NeMo, Presidio, the Mesh
+specialists, the output rail and the deterministic verifier all apply. `summarize_redteam.py`
+turns the results into a committed report and the evidence file the governance gate reads; until
+that file exists, the gate stays `not_run`. Model-based probe generation and grading are both
+configured as
 `openai:chat:openai/gpt-5.4-mini` with `apiBaseUrl=https://api.meshapi.ai/v1` and
 `apiKeyEnvar=MESH_API_KEY`. Direct provider fallbacks are disabled. Promptfoo result sharing and
 remote generation must remain disabled. Only authorized synthetic data may be used.

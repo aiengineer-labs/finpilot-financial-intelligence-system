@@ -3,7 +3,7 @@
 `governance_artifacts` stores tenant-scoped, versioned and SHA-256-hashed records for these artifacts:
 
 - the Mesh model
-- the advice prompts and the categorizer prompt (`categorizer-prompts-v1`)
+- the advice prompts and the categorizer prompt (`categorizer-prompts-v2`, which adds `payments_to_people` and the UPI handle markers)
 - the LangGraph graph
 - the NeMo/Presidio guardrails
 - the deterministic verifier and the financial engine

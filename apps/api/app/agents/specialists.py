@@ -9,12 +9,15 @@ from pydantic import BaseModel, Field
 from app.engines.categorization import (
     EXPENSE_FALLBACK,
     INCOME_FALLBACK,
+    PEOPLE_PAYMENTS,
     SEMANTIC_EXPENSE_CATEGORIES,
     SEMANTIC_INCOME_CATEGORIES,
 )
 from app.integrations.mesh import MeshClient, MeshMessage, MeshResult
 
-CATEGORIZER_PROMPT_VERSION = "categorizer-prompts-v1"
+CATEGORIZER_PROMPT_VERSION = "categorizer-prompts-v2"
+MERCHANT_UPI_MARKER = "<merchant-upi>"
+PERSONAL_UPI_MARKER = "<personal-upi>"
 MAX_CATEGORIZER_LABELS = 40
 
 
@@ -243,7 +246,12 @@ class CategorizerAgent:
                         + ", ".join(SEMANTIC_EXPENSE_CATEGORIES)
                         + ". credit labels may use only: "
                         + ", ".join(SEMANTIC_INCOME_CATEGORIES)
-                        + f". If a label is a payment to a person, a bare reference, or "
+                        + f". {MERCHANT_UPI_MARKER} means the payee used a merchant QR or "
+                        "business UPI handle: choose the category from the payee's business "
+                        f"name. {PERSONAL_UPI_MARKER} means a personal UPI handle: a debit to "
+                        f"a named person is {PEOPLE_PAYMENTS} unless the label says what was "
+                        "bought. Indian shop names often start with Sri, Shri or New; judge "
+                        "them by the words that follow. If a label is a bare reference or "
                         f"otherwise unclear, answer {EXPENSE_FALLBACK} for a debit or "
                         f"{INCOME_FALLBACK} for a credit. confidence_bps is your confidence "
                         "from 0 to 10000. Use only the supplied label_ids. Return JSON only: "

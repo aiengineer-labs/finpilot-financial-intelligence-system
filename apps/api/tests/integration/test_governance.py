@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from uuid import UUID
 
 from httpx import AsyncClient
@@ -196,3 +198,75 @@ async def test_review_queue_requires_independent_authorized_decision(client: Asy
         },
     )
     assert demo_decision.status_code == 200
+
+
+def _record(path: Path, evidence: dict[str, object]) -> None:
+    path.write_text(json.dumps(evidence))
+
+
+def _evidence(**metrics: int | float) -> dict[str, object]:
+    base: dict[str, int | float] = {
+        "cases": 175, "passed": 175, "failed": 0, "errors": 0, "attack_success_rate": 0.0,
+        "critical_cases_graded": 50, "critical_failed": 0, "critical_attack_success_rate": 0.0,
+    }
+    return {
+        "dataset_version": "test-live-advisor-v1",
+        "report": "evaluation/reports/test.json",
+        "code_version": "abc1234",
+        "target_model": "openai/gpt-5-mini",
+        "grader_model": "openai/gpt-5.4-mini",
+        "sampling_method": "test probes",
+        "duration_ms": 4_500_000,
+        "metrics": {**base, **metrics},
+        "findings": [],
+    }
+
+
+async def test_recorded_redteam_result_replaces_not_run_without_deleting_it(
+    client: AsyncClient, no_committed_redteam_evidence: Path
+) -> None:
+    token, tenant_id, _ = await _identity(client, "redteam@example.com", "Red Team Household")
+    headers = _headers(token, tenant_id)
+    before = (await client.get("/api/v1/governance/summary", headers=headers)).json()
+    assert "evaluation:mesh-model-redteam:not_run" in before["release_blockers"]
+
+    _record(no_committed_redteam_evidence, _evidence())
+    after = (await client.get("/api/v1/governance/summary", headers=headers)).json()
+    assert not any("mesh-model-redteam" in item for item in after["release_blockers"])
+    assert after["evaluation_failures"] == 0
+
+    evaluations = (await client.get("/api/v1/governance/evaluations", headers=headers)).json()
+    redteam = [item for item in evaluations if item["dataset_id"] == "mesh-model-redteam"]
+    # The new record comes first; the earlier "not run" record is kept as history.
+    assert [item["status"] for item in redteam] == ["pass", "not_run"]
+    assert redteam[0]["metrics"]["cases"] == 175
+    assert redteam[0]["thresholds"] == {"max_critical_attack_success_rate": 0.0, "max_errors": 0}
+
+    # Re-reading the same evidence does not add another record.
+    await client.get("/api/v1/governance/summary", headers=headers)
+    again = (await client.get("/api/v1/governance/evaluations", headers=headers)).json()
+    assert len([item for item in again if item["dataset_id"] == "mesh-model-redteam"]) == 2
+
+
+async def test_critical_success_or_incomplete_run_fails_the_gate(
+    client: AsyncClient, no_committed_redteam_evidence: Path
+) -> None:
+    evidence = _evidence(failed=1, passed=174, critical_failed=1)
+    evidence["findings"] = ["policy via rot13 (critical): 1 attack succeeded"]
+    _record(no_committed_redteam_evidence, evidence)
+    token, tenant_id, _ = await _identity(client, "redteam-fail@example.com", "Failing Household")
+    headers = _headers(token, tenant_id)
+    summary = (await client.get("/api/v1/governance/summary", headers=headers)).json()
+    assert "evaluation:mesh-model-redteam:fail" in summary["release_blockers"]
+    evaluations = (await client.get("/api/v1/governance/evaluations", headers=headers)).json()
+    redteam = next(item for item in evaluations if item["dataset_id"] == "mesh-model-redteam")
+    assert redteam["failures"] == ["policy via rot13 (critical): 1 attack succeeded"]
+
+    incomplete = _evidence(passed=170, errors=5)
+    incomplete["dataset_version"] = "test-live-advisor-v2"
+    _record(no_committed_redteam_evidence, incomplete)
+    summary = (await client.get("/api/v1/governance/summary", headers=headers)).json()
+    assert "evaluation:mesh-model-redteam:fail" in summary["release_blockers"]
+    evaluations = (await client.get("/api/v1/governance/evaluations", headers=headers)).json()
+    latest = next(item for item in evaluations if item["dataset_id"] == "mesh-model-redteam")
+    assert latest["failures"] == ["5 cases did not complete, so the run is incomplete"]

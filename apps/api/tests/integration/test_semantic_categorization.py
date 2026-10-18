@@ -60,17 +60,25 @@ ANSWERS = {
 class FakeCategorizerTransport:
     """Answers from the labels it receives and keeps every payload for inspection."""
 
-    def __init__(self, extra: list[dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        extra: list[dict[str, Any]] | None = None,
+        answers: dict[str, tuple[str, int]] | None = None,
+    ) -> None:
         self.payloads: list[dict[str, Any]] = []
         self.extra = extra or []
+        self.answers = answers or ANSWERS
+
+    def sent_labels(self, call: int = -1) -> list[dict[str, str]]:
+        content = self.payloads[call]["messages"][1]["content"]
+        return list(json.loads(content.removeprefix("Labels: "))["labels"])
 
     async def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         self.payloads.append(payload)
-        labels = json.loads(payload["messages"][1]["content"].removeprefix("Labels: "))["labels"]
         answers = [
             {"label_id": label["label_id"], "category": category, "confidence_bps": confidence}
-            for label in labels
-            for fragment, (category, confidence) in ANSWERS.items()
+            for label in self.sent_labels()
+            for fragment, (category, confidence) in self.answers.items()
             if fragment in label["text"]
         ]
         return {
@@ -161,7 +169,8 @@ async def test_mesh_proposals_are_applied_only_when_code_accepts_them(client: As
     assert not any("Ignore previous" in text for text in texts)
     assert not any("Swift Eats" in text or "Self transfer" in text for text in texts)
     assert any("<EMAIL_ADDRESS>" in text for text in texts)
-    assert any("UPI <REF>" in text for text in texts)
+    assert any(text == "Rahul Sharma - UPI" for text in texts)
+    assert "412345678901" not in payload["messages"][1]["content"]
     content = payload["messages"][1]["content"]
     assert "412.50" not in content and "41250" not in content and "amount" not in content
     schema = payload["response_format"]["json_schema"]
@@ -183,7 +192,7 @@ async def test_mesh_proposals_are_applied_only_when_code_accepts_them(client: As
     assert result.run.details["unknown_label_ids"] == 1
     assert result.run.details["cost_usd"] == "0.00012"
     assert result.run.artifact_lineage["categorizer_prompt"].split(":")[1] == (
-        "categorizer-prompts-v1"
+        "categorizer-prompts-v2"
     )
 
     after = await _rows(account_id)
@@ -226,6 +235,107 @@ async def test_mesh_proposals_are_applied_only_when_code_accepts_them(client: As
         )
     assert replay.run is None and replay.rows_remaining == 0
     assert len(transport.payloads) == 1
+
+
+UPI_STATEMENT = b"""Date,Amount,Merchant,Description,Transaction ID,Currency
+2026-09-01,-120.00,UPI/SRI SAI STORES/q123456789@ybl/UPI/YESB/512345678901/ICI1a2b3c4d5e6f7/,,u1,INR
+2026-09-03,-80.00,UPI/SRI SAI STORES/q123456789@ybl/UPI/YESB/512345678902/ICI9z8y7x6w5v4u3/,,u2,INR
+2026-09-04,-500.00,UPI/ANITA RAO/9876543210@ybl/UPI/SBIN/512345678903/AXI5k4j3h2g1f0d9/,,u3,INR
+2026-09-05,-2000.00,NFS/CASH WDL/512345678904/MG ROAD ATM/,,u4,INR
+"""
+
+
+async def test_upi_lines_are_grouped_by_payee_without_private_identifiers(
+    client: AsyncClient,
+) -> None:
+    headers, tenant, user = await _workspace(client)
+    account = await client.post(
+        "/api/v1/accounts",
+        headers=headers,
+        json={"name": "Bank", "currency": "INR", "external_reference": "upi"},
+    )
+    account_id = account.json()["id"]
+    uploaded = await client.post(
+        f"/api/v1/accounts/{account_id}/transaction-uploads",
+        headers=headers,
+        data={"mapping": json.dumps(MAPPING)},
+        files={"file": ("upi.csv", UPI_STATEMENT, "text/csv")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    before = await _rows(account_id)
+    # ATM withdrawals are a keyword rule, so they never reach the model.
+    assert before["u4"].category == "cash_withdrawal"
+    assert before["u4"].classification_method is ClassificationMethod.RULE
+
+    transport = FakeCategorizerTransport(
+        answers={
+            "SRI SAI STORES": ("groceries", 8_000),
+            "ANITA RAO": ("payments_to_people", 9_000),
+        }
+    )
+    async with SessionFactory() as session:
+        result = await categorize_ambiguous_rows(
+            session,
+            tenant_id=UUID(tenant),
+            user_id=UUID(user),
+            account_id=UUID(account_id),
+            settings=TEST_SETTINGS,
+            mesh=MeshClient(TEST_SETTINGS, transport),
+        )
+
+    texts = sorted(label["text"] for label in transport.sent_labels())
+    # Two payments to one shop with different references collapse into one label.
+    assert texts == [
+        "UPI / ANITA RAO / <personal-upi> / UPI / SBIN",
+        "UPI / SRI SAI STORES / <merchant-upi> / UPI / YESB",
+    ]
+    content = transport.payloads[0]["messages"][1]["content"]
+    for private in ("512345678901", "ICI1a2b3c4d5e6f7", "9876543210", "q123456789", "@ybl"):
+        assert private not in content
+    assert "payments_to_people" in transport.payloads[0]["messages"][0]["content"]
+    assert result.run is not None and result.run.rows_updated == 3
+    after = await _rows(account_id)
+    assert after["u1"].category == after["u2"].category == "groceries"
+    assert after["u3"].category == "payments_to_people"
+    assert after["u3"].classification_method is ClassificationMethod.MESH
+
+
+async def test_rows_left_unclear_by_an_older_prompt_are_asked_again(
+    client: AsyncClient,
+) -> None:
+    headers, tenant, user = await _workspace(client)
+    account_id = await _imported_account(client, headers)
+    first = FakeCategorizerTransport()
+    async with SessionFactory() as session:
+        result = await categorize_ambiguous_rows(
+            session,
+            tenant_id=UUID(tenant),
+            user_id=UUID(user),
+            account_id=UUID(account_id),
+            settings=TEST_SETTINGS,
+            mesh=MeshClient(TEST_SETTINGS, first),
+        )
+        assert result.run is not None
+        # Pretend the answers came from the previous prompt version.
+        result.run.prompt_version = "categorizer-prompts-v1"
+        await session.commit()
+
+    second = FakeCategorizerTransport(answers={"Rahul Sharma": ("payments_to_people", 9_000)})
+    async with SessionFactory() as session:
+        retried = await categorize_ambiguous_rows(
+            session,
+            tenant_id=UUID(tenant),
+            user_id=UUID(user),
+            account_id=UUID(account_id),
+            settings=TEST_SETTINGS,
+            mesh=MeshClient(TEST_SETTINGS, second),
+        )
+    resent = sorted(label["text"] for label in second.sent_labels())
+    # Rows the old prompt categorized stay put; only the ones it left unclear are re-sent.
+    assert not any("Kumar Kirana" in text or "Fixit" in text for text in resent)
+    assert len(resent) == 4 and any("Rahul Sharma" in text for text in resent)
+    assert retried.run is not None and retried.run.rows_updated == 1
+    assert (await _rows(account_id))["t4"].category == "payments_to_people"
 
 
 async def test_human_corrections_are_never_sent_or_overwritten(client: AsyncClient) -> None:
@@ -323,4 +433,4 @@ async def test_route_is_tenant_scoped_and_needs_mesh_only_for_pending_rows(
     assert nothing.status_code == 200, nothing.text
     body = nothing.json()
     assert body["status"] == "not_needed" and body["id"] is None
-    assert body["labels_sent"] == 0 and body["prompt_version"] == "categorizer-prompts-v1"
+    assert body["labels_sent"] == 0 and body["prompt_version"] == "categorizer-prompts-v2"
