@@ -4,7 +4,7 @@ FinPilot reads a bank or credit-card statement and returns spending and cash-flo
 
 The split between code and model is strict. Deterministic Python owns every number: parsing, recurrence, anomalies, forecasts, and spending summaries. Specialized agents call the sponsor Mesh API for two things only. They propose categories for statement labels the keyword rules cannot place, and they explain the computed evidence and draft options. An independent verifier, written in plain code, checks each recommendation's amounts, evidence citations, and currency before release. Advice that fails is withheld.
 
-[Implementation status](docs/IMPLEMENTATION_STATUS.md) is the source of truth for verified results and blockers. Live Mesh advice and categorization runs have been exercised on synthetic data only. The model-based Mesh red team has not been run, and there is no hosted deployment. Nothing here implies regulatory certification.
+[Implementation status](docs/IMPLEMENTATION_STATUS.md) is the source of truth for verified results and blockers. Live Mesh advice and categorization runs have been exercised on synthetic data only. The model-based Mesh red team now targets the live advisor but has not been run, and there is no hosted deployment. Nothing here implies regulatory certification.
 
 ## How a statement flows through FinPilot
 
@@ -18,8 +18,8 @@ flowchart TB
     PDF["Text-PDF adapter<br/>delimited · aligned card · column bank"]
     KIND{"Statement kind"}
     NORM["Normalize<br/>minor units · transfers · refunds · duplicates"]
-    CAT["Categorization rules v2"]
-    SEM["Mesh categorizer<br/>unclear labels only · fixed list"]
+    CAT["Categorization rules v3"]
+    SEM["Mesh categorizer v2<br/>payee labels · UPI markers · fixed list"]
   end
   API --> INTAKE
   INTAKE --> CSV
@@ -49,7 +49,7 @@ flowchart TB
   CASH --> GRAPH
   SPEND --> GRAPH
   GRAPH -->|"analyst · advisor · critic"| MESH
-  SEM -->|"labels, no amounts"| MESH
+  SEM -->|"payee labels, no amounts"| MESH
   GRAPH --> VERIFY
   VERIFY -->|"accept"| REC["Verified recommendations"]
   VERIFY -->|"reject"| HOLD["Advice withheld<br/>human review case"]
@@ -65,7 +65,7 @@ flowchart TB
    - each UPI handle becomes `<merchant-upi>` or `<personal-upi>`, so Mesh can tell a shop from a person (`payments_to_people`)
    - labels are bounded, injection-screened and Presidio-minimized, and they carry no amounts
 
-   Payee names are still sent. Code applies a proposal only when it fits the row's debit or credit direction and has at least 70% confidence. Applied rows are stored as `mesh` with confidence capped at 85%, below the rules' 90%. The run saves every answer, applied or not, with the previous category. A reviewer can still correct any category with recorded lineage, and a human correction is never overwritten. Import itself never calls Mesh. If the categorizer fails, analysis continues with the rule categories.
+   Payee names are still sent. Code applies a proposal only when it fits the row's debit or credit direction and has at least 70% confidence. Applied rows are stored as `mesh` with confidence capped at 85%, below the rules' 90%. The run saves every answer, applied or not, with the previous category. A row is sent once per categorizer prompt version, so a new version asks again about rows the previous one left unclear. A reviewer can still correct any category with recorded lineage, and a human correction is never overwritten. Import itself never calls Mesh. If the categorizer fails, analysis continues with the rule categories.
 2. **Analyze.** A snapshot (`financial-v3`) freezes the evidence for one account and one as-of date. It records recurring patterns, robust anomalies, and a spending summary: totals, monthly pace, top categories and merchants, the monthly saving from a 20% cut, recurring charges, and, for bank accounts, net flow and savings rate. Bank statements run in `cashflow` mode and can produce 30/60/90-day daily forecasts and what-if branches. Card and balance-free statements run in `spending` mode with a null opening balance. A forecast request against them returns 422.
 3. **Advise and verify.** An agent run is grounded in exactly one forecast (with an optional scenario) or one snapshot. The graph below produces typed recommendations, and the verifier decides whether any of them is released.
 
@@ -97,12 +97,12 @@ Agents cannot move money, trade, purchase, cancel services, run code, shell, or 
 
 The web app opens without a login. The browser calls `POST /api/v1/workspace/bootstrap`, which creates an empty, isolated workspace and returns a short-lived token. The API still derives the tenant from server-side membership. No financial data is preloaded.
 
-- **Analyze** is the default screen, designed as an AI copilot. Drop in a statement, or try the bundled sample. A six-stage map shows Import → Categorize → Analyze → Forecast → Advise → Verify. After import, a briefing lists deterministic highlights computed from ledger rows, and the Rhythm daily spending calendar and Spend mix panels appear. **Run FinPilot** sends unclear rows to the Mesh categorizer, takes a snapshot, adds a forecast for bank accounts, and starts the agent run. A live pipeline track follows the run, ending in a chat-style answer: a verified badge, ranked recommendations with confidence and evidence counts, and an expandable persisted event trace. If the advisor fails, the deterministic results stay on screen with an explanation and an in-place retry.
+- **Analyze** is the default screen, designed as an AI copilot. Drop in a statement, or try the bundled sample. A six-stage map shows Import → Categorize → Analyze → Forecast → Advise → Verify. After import, a briefing lists deterministic highlights computed from ledger rows, and the Rhythm daily spending calendar and Spend mix panels appear. **Run FinPilot** sends unclear rows to the Mesh categorizer in up to six passes of 40 payee labels each, takes a snapshot, adds a forecast for bank accounts, and starts the agent run. A live pipeline track follows the run, ending in a chat-style answer: a verified badge, ranked recommendations with confidence and evidence counts, and an expandable persisted event trace. If the advisor fails, the deterministic results stay on screen with an explanation and an in-place retry.
 - **Console** holds the full workspace views:
   - **Overview** and **Ledger**: provenance, filters, and a category correction drawer.
   - **Forecast**: horizon choice and what-if presets.
   - **Advisor** and **Audit trail**: per-call Mesh tokens, cache, reasoning, latency, and billed cost.
-  - **Governance**: readiness cards, registry, risks, evaluations, and the review queue.
+  - **Governance**: readiness cards, registry, risks, the review queue, and quality checks. Each check shows its newest record, including the measured attack outcome once the model red team has run.
   - **Digests**: weekly check-in schedule and delivery audit.
 - **How it works** renders the architecture from `GET /api/v1/system/architecture`. It is served from the same manifest that builds the LangGraph, and it can replay the latest run's persisted events.
 
@@ -164,10 +164,10 @@ All product routes are under `/api/v1`. Tenant routes need the bearer token and 
 | Workspace and auth | `POST /workspace/bootstrap`, `GET /auth/me` (`/auth/register` and `/auth/login` remain for API clients) |
 | Accounts | `GET` and `POST /accounts` with `deposit`, `credit_card`, or `unknown` type |
 | Statements and ledger | `POST /accounts/{id}/transaction-uploads`, `GET /transaction-uploads/{id}`, `GET /transactions?account_id=`, `PATCH /transactions/{id}/category` |
-| Categorization | `POST /accounts/{id}/categorization-runs`: Mesh labels for `mesh_required` rows. It returns `not_needed` without a model call when nothing is pending |
+| Categorization | `POST /accounts/{id}/categorization-runs`: up to 40 Mesh payee labels for `mesh_required` rows that the current categorizer prompt version has not answered. It returns `not_needed` without a model call when nothing is pending |
 | Analytics | `POST` and `GET /analytics/snapshots`, `/analytics/forecasts`, `/analytics/scenarios` |
 | Agents | `POST /agent-runs` with `forecast_id` (and optional `scenario_id`) or `snapshot_id`, `GET /agent-runs/{id}` |
-| Governance | `/governance/summary`, `artifacts`, `risks`, `evaluations`, `reviews`, review decisions, `demo-review` |
+| Governance | `/governance/summary`, `artifacts`, `risks`, `evaluations` (every record is kept; the release gate uses the newest per check), `reviews`, review decisions, `demo-review` |
 | Digests | `/digests/preference`, `jobs`, `notifications`; `GET /digests/dispatch` is authenticated with `CRON_SECRET` |
 | System | `GET /system/architecture`, plus `/health` and `/ready` at the root |
 
@@ -199,16 +199,29 @@ docker compose config --quiet
 git diff --check
 ```
 
-These are the latest results recorded in [implementation status](docs/IMPLEMENTATION_STATUS.md) (2026-10-17):
+These are the latest results recorded in [implementation status](docs/IMPLEMENTATION_STATUS.md) (2026-10-18):
 
-- **Backend:** 303 pytest tests at 85% line coverage, and 207 security tests passing.
-- **Web:** ESLint with zero warnings, strict TypeScript, and a Next.js production build inside the Docker image.
-- **Smoke:** `make smoke` passed 16/16 checks on the last recorded run.
+- **Backend:** 306 pytest tests passed and 1 skipped, at 85% line coverage. The skipped test checks the red-team evidence file against its report and runs once that file exists. 208 security tests pass.
+- **Web:** ESLint with zero warnings, strict TypeScript, and a Next.js production build.
+- **CI:** on pull request #6, all six CI and Security jobs passed: backend, frontend, compose-config, evaluation-smoke, policy-regression, and source-and-secrets.
+- **Smoke:** `make smoke` passed 16/16 checks on the last recorded run, for categorizer v2.
 - **Promptfoo:** the offline corpus passed 184/184 cases: 0 of 168 attacks missed, and 0 false positives among 16 legitimate controls.
 - **Live Mesh advice:** synthetic-sample runs through the web gateway completed 3 of 3 with `ACCEPT`, taking 23.5–26.0 s each.
 - **Live Mesh categorization (`categorizer-prompts-v2`):** on a synthetic UPI statement, one call sent 4 payee labels covering 5 unclear rows and took 3.3 s. It applied all 5: a merchant-QR shop became `groceries`, a tiffin centre became `dining`, and two personal UPI payments became `payments_to_people`. Rules handled the ATM and "Medicals" rows without Mesh. No amounts changed, and a repeat request made no model call.
+- **Model red team:** not run yet, so the release gate reports it as `not_run`.
 
 Methodology and evidence are in [evaluation results](docs/evaluation/results.md).
+
+### Model red team
+
+Release also needs a model-based red team. [promptfooconfig.redteam.yaml](evaluation/promptfoo/promptfooconfig.redteam.yaml) generates and grades attacks with Mesh. Its target, [live_advice_provider.py](evaluation/promptfoo/live_advice_provider.py), sends each attack as the advice question through `POST /api/v1/agent-runs`, in a workspace that holds only the synthetic household dataset. Every production layer applies: the injection policy, NeMo, Presidio, the Mesh specialists, the output rail and the verifier. A provider failure counts as an error, not as a defended attack.
+
+[summarize_redteam.py](evaluation/promptfoo/summarize_redteam.py) turns the raw results into two files:
+
+- a committed report under `evaluation/reports/`, with counts, rates and short grader reasons but no generated attacks or full model output
+- the evidence file `apps/api/app/evidence/model_redteam.json`
+
+Governance records each new dataset version as an immutable `mesh-model-redteam` evaluation. It passes only when cases were graded with zero errors and zero successful critical attacks. Until the evidence file exists, the check stays `not_run` and blocks release. A run needs explicit Mesh egress approval and synthetic data only.
 
 ## Deployment and limitations
 
@@ -216,12 +229,12 @@ Two Vercel project roots are prepared, `apps/api` and `apps/web`. The API's `ver
 
 Known limitations:
 
-- The Mesh model-based red team has not been run. It remains a release blocker.
+- The Mesh model-based red team has not been run, so it still blocks release. The live-advisor target and the evidence summarizer are ready.
 - There is no hosted deployment, and the Vercel bundle and runtime size are unmeasured. The full API image is about 1.06 GB.
 - The full image carries one upstream Debian zlib high-severity finding that has no fixed package yet.
 - Categorizer accuracy has not been measured on a labelled holdout set. The confidence gate limits wrong labels but does not measure them.
 - PDF intake reads embedded text only. Public arbitrary-PDF intake needs process isolation and a malware scanner first.
-- The organizer's Agent Arena Checks workflow has not yet passed.
+- The organizer's Agent Arena Checks workflow passes its 4 critical checks. The job still fails because the organizer records a result only after the hackathon entry form is submitted.
 
 See [known limitations](docs/security/known-limitations.md).
 
