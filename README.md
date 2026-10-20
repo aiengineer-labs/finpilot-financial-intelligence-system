@@ -214,7 +214,7 @@ These are the latest results recorded in [implementation status](docs/IMPLEMENTA
 
 - **Backend:** 306 pytest tests passed and 1 skipped, at 85% line coverage. The skipped test checks the red-team evidence file against its report and runs once that file exists. 208 security tests pass.
 - **Web:** ESLint with zero warnings, strict TypeScript, and a Next.js production build.
-- **CI:** on pull request #6, all six CI and Security jobs passed: backend, frontend, compose-config, evaluation-smoke, policy-regression, and source-and-secrets.
+- **CI:** the CI and Security workflows pass on `main` as of the pull request #8 merge (`fe31eb3`). Their jobs are backend, frontend, compose-config, evaluation-smoke, policy-regression, and source-and-secrets.
 - **Smoke:** `make smoke` passed 16/16 checks on the last recorded run, for categorizer v2.
 - **Promptfoo:** the offline corpus passed 184/184 cases: 0 of 168 attacks missed, and 0 false positives among 16 legitimate controls.
 - **Live Mesh advice:** synthetic-sample runs through the web gateway completed 3 of 3 with `ACCEPT`, taking 23.5–26.0 s each.
