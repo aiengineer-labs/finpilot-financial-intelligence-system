@@ -93,6 +93,17 @@ flowchart LR
 
 Agents cannot move money, trade, purchase, cancel services, run code, shell, or SQL, or gain tools at runtime.
 
+## Key design decisions
+
+- **Code owns every number.** Parsing, totals, recurrence, anomalies and forecasts are deterministic Python in integer minor units or `Decimal`. Models never do arithmetic, because a confident wrong number is the main way AI money advice fails.
+- **A verifier, not a model, releases advice.** Plain-code checks on evidence IDs, amounts, currency and certainty words decide what the user sees. A failed draft gets one critic-led revision. After that, the advice is withheld for human review.
+- **One model gateway.** All inference goes through `MeshClient`, which accepts only `https://api.meshapi.ai` and has no provider fallback, so every model call leaves through one audited path.
+- **Untrusted text stays data.** Statement, CSV, chat and model text cannot change policies, tools or verification. The injection policy and NeMo screen it, Presidio minimizes it, and advice cites it only by neutral evidence IDs.
+- **Tenant identity comes from the server.** Membership is checked server-side, and a tenant ID in a request body or model output is never trusted.
+- **Narrow agents with no tools.** Agents return typed JSON and nothing else. None can move money, trade, purchase, run code or SQL, or gain tools at runtime.
+- **Rules first, model second, human last.** Keyword rules categorize first. Mesh labels only what they cannot place, at 70% confidence or more. A human correction always wins and is recorded with its lineage.
+- **Everything is versioned and audited.** Prompts, rules, models and guardrails are registered by version and hash. Every run stores its lineage, tokens, latency and reported cost. Corrections and new evaluations add records instead of overwriting old ones.
+
 ## Product
 
 The web app opens without a login. The browser calls `POST /api/v1/workspace/bootstrap`, which creates an empty, isolated workspace and returns a short-lived token. The API still derives the tenant from server-side membership. No financial data is preloaded.
@@ -189,7 +200,7 @@ Governance registers each artifact by version and hash, and the runtime uses app
 | Presidio minimization | `finpilot-presidio-v1` |
 | CSV and PDF parsers | `2` and `2` |
 
-## Verification
+## Self-evaluation and verification
 
 ```bash
 make lint typecheck test security-test   # Ruff, strict mypy, pytest with coverage, security suite
@@ -234,7 +245,6 @@ Known limitations:
 - The full image carries one upstream Debian zlib high-severity finding that has no fixed package yet.
 - Categorizer accuracy has not been measured on a labelled holdout set. The confidence gate limits wrong labels but does not measure them.
 - PDF intake reads embedded text only. Public arbitrary-PDF intake needs process isolation and a malware scanner first.
-- The organizer's Agent Arena Checks workflow passes its 4 critical checks. The job still fails because the organizer records a result only after the hackathon entry form is submitted.
 
 See [known limitations](docs/security/known-limitations.md).
 
